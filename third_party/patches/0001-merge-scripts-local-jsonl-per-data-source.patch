@@ -1,0 +1,80 @@
+diff --git a/scripts/data_process/qa_search_test_merge.py b/scripts/data_process/qa_search_test_merge.py
+index 6bc98b8..724d602 100644
+--- a/scripts/data_process/qa_search_test_merge.py
++++ b/scripts/data_process/qa_search_test_merge.py
+@@ -39,12 +39,26 @@ If you find no further external knowledge needed, you can directly provide the a
+     return prefix
+ 
+ 
++def load_qa_dataset(data_source, raw_dir):
++    """Load local FlashRAG jsonl dumps ({data_source}_{split}.jsonl) if present, else fall back to HF hub."""
++    data_files = {}
++    for split in ('train', 'dev', 'test'):
++        path = os.path.join(raw_dir, f'{data_source}_{split}.jsonl')
++        if os.path.exists(path):
++            data_files[split] = path
++    if data_files:
++        print(f'Loading {data_source} from local files: {data_files}')
++        return datasets.load_dataset('json', data_files=data_files)
++    return datasets.load_dataset('RUC-NLPIR/FlashRAG_datasets', data_source)
++
++
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser()
+     parser.add_argument('--local_dir', default='./data/nq_search')
+     parser.add_argument('--hdfs_dir', default=None)
+     parser.add_argument('--template_type', type=str, default='base')
+     parser.add_argument('--data_sources', default='nq')
++    parser.add_argument('--raw_dir', default='./data/flashrag_raw', help='local dir with {data_source}_{split}.jsonl; falls back to HF if missing')
+ 
+     args = parser.parse_args()
+ 
+@@ -54,7 +68,7 @@ if __name__ == '__main__':
+     for data_source in data_sources:
+ 
+         if data_source != 'strategyqa':
+-            dataset = datasets.load_dataset('RUC-NLPIR/FlashRAG_datasets', data_source)
++            dataset = load_qa_dataset(data_source, args.raw_dir)
+         else:
+             dataset = datasets.load_dataset('json', data_files="/home/peterjin/mnt/data/strategyqa/test_correct.jsonl")
+ 
+diff --git a/scripts/data_process/qa_search_train_merge.py b/scripts/data_process/qa_search_train_merge.py
+index ac8de65..f9d67f4 100644
+--- a/scripts/data_process/qa_search_train_merge.py
++++ b/scripts/data_process/qa_search_train_merge.py
+@@ -39,12 +39,26 @@ If you find no further external knowledge needed, you can directly provide the a
+     return prefix
+ 
+ 
++def load_qa_dataset(data_source, raw_dir):
++    """Load local FlashRAG jsonl dumps ({data_source}_{split}.jsonl) if present, else fall back to HF hub."""
++    data_files = {}
++    for split in ('train', 'dev', 'test'):
++        path = os.path.join(raw_dir, f'{data_source}_{split}.jsonl')
++        if os.path.exists(path):
++            data_files[split] = path
++    if data_files:
++        print(f'Loading {data_source} from local files: {data_files}')
++        return datasets.load_dataset('json', data_files=data_files)
++    return datasets.load_dataset('RUC-NLPIR/FlashRAG_datasets', data_source)
++
++
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser()
+     parser.add_argument('--local_dir', default='./data/nq_search')
+     parser.add_argument('--hdfs_dir', default=None)
+     parser.add_argument('--template_type', type=str, default='base')
+     parser.add_argument('--data_sources', default='nq')
++    parser.add_argument('--raw_dir', default='./data/flashrag_raw', help='local dir with {data_source}_{split}.jsonl; falls back to HF if missing')
+ 
+     args = parser.parse_args()
+ 
+@@ -54,7 +68,7 @@ if __name__ == '__main__':
+ 
+     for data_source in data_sources:
+ 
+-        dataset = datasets.load_dataset('RUC-NLPIR/FlashRAG_datasets', data_source)
++        dataset = load_qa_dataset(data_source, args.raw_dir)
+ 
+         train_dataset = dataset['train']
+ 
