@@ -111,6 +111,7 @@ class StopReason(str, Enum):
     ANSWERED = "answered"            # 模型自己决定作答
     FORCED_ANSWER = "forced_answer"  # 被预算截停后作答：最后一轮，或搜索次数用完后仍想搜
     NO_ANSWER = "no_answer"          # 轮数用完仍没给出合法答案
+    ERROR = "error"                  # 模型服务重试后仍失败；计 0 分，但留在准确率的分母里
 
 
 class Step(BaseModel):
@@ -131,5 +132,7 @@ class Trajectory(BaseModel):
     question: str
     budget: Budget
     steps: list[Step]
+    budget_state: BudgetState  # 最终用量；模型第一轮就失败时 steps 为空，统计成本靠它
     final_answer: Optional[str] = None
     stop_reason: StopReason
+    error: Optional[str] = None  # stop_reason=error 时记录异常类型和信息

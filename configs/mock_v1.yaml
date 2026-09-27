@@ -1,0 +1,19 @@
+# Day 1 流程验证：规则假模型 + 假检索。准确率没有意义，只验证"配置 → 运行 → 评测 → 落盘"整条流程。
+name: mock-v1
+seed: 42
+
+data:
+  path: data_prep/mock/qa.jsonl
+  split: mock  # 正式实验只能是 validation / test；阈值和提示词只在 validation 上调
+
+llm:
+  type: search_then_title  # Day 3 换成真模型，并在这里记模型名和解码参数（temperature、max_tokens）
+  retry: {max_retries: 3, base_delay_s: 1.0}
+
+retrieval:
+  type: mock
+
+budget:
+  max_turns: 5
+  max_search_calls: 3
+  top_k: 3

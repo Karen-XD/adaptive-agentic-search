@@ -41,7 +41,7 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
     seen_doc_ids: set[str] = set()
     budget_hit = False  # 搜索次数用完后模型仍想搜：之后只许作答
     notified = False    # 是否已经告诉过模型"只许作答"
-    answer, stop_reason = None, StopReason.NO_ANSWER
+    answer, stop_reason, error = None, StopReason.NO_ANSWER, None
 
     while state.can_take_turn(budget):
         # 只在"最后一轮"或"模型想超预算搜索"之后强制作答；搜索次数刚用完时不提前强制，
@@ -52,7 +52,12 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
             notified = True
 
         t0 = time.perf_counter()
-        generated = llm.generate(messages)
+        try:
+            generated = llm.generate(messages)
+        except Exception as e:
+            # 模型服务重试后仍失败：记成 error，已跑完的轮次照样保留；是否重试由 RetryingLLM 负责
+            error, stop_reason = f"{type(e).__name__}: {e}", StopReason.ERROR
+            break
         llm_ms = (time.perf_counter() - t0) * 1000
         state.turns_used += 1
 
@@ -100,5 +105,5 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
         # role="tool"：Qwen2.5 的对话模板会把它包进 <tool_response>；Day 3 接真模型时核对渲染结果
         messages.append({"role": "tool", "content": render_observation(obs)})
 
-    return Trajectory(qid=qid, question=question, budget=budget, steps=steps,
-                      final_answer=answer, stop_reason=stop_reason)
+    return Trajectory(qid=qid, question=question, budget=budget, steps=steps, budget_state=state,
+                      final_answer=answer, stop_reason=stop_reason, error=error)

@@ -5,7 +5,7 @@
 """
 import pytest
 
-from agent.llm import ScriptedLLM
+from agent.llm import RetryingLLM, ScriptedLLM
 from agent.loop import normalize_query, run_episode
 from agent.prompts import FORCED_ANSWER_NOTICE
 from agent.schema import Budget, ErrorCode, StopReason, Trajectory
@@ -152,6 +152,41 @@ def test_trajectory_json_roundtrip():
     traj, _ = run([call("search", query="Luminara Labs"), "oops", call("final_answer", answer="Port Edvik")])
     assert Trajectory.model_validate_json(traj.model_dump_json()) == traj
 
+
+
+class FlakyLLM:
+    """前 n 次调用抛指定异常，之后按剧本输出。"""
+
+    def __init__(self, n_failures, exc, outputs):
+        self.n_failures, self.exc, self.calls = n_failures, exc, 0
+        self.inner = ScriptedLLM(outputs)
+
+    def generate(self, messages):
+        self.calls += 1
+        if self.calls <= self.n_failures:
+            raise self.exc
+        return self.inner.generate(messages)
+
+
+def test_model_error_recorded_and_steps_kept():
+    llm = FlakyLLM(0, None, [call("search", query="Luminara Labs")])  # 第二轮剧本耗尽 → 模型报错
+    traj = run_episode("q-001", Q, llm, MockSearchTool(), Budget())
+    assert traj.stop_reason == StopReason.ERROR and traj.final_answer is None
+    assert len(traj.steps) == 1 and "RuntimeError" in traj.error
+    assert traj.budget_state.search_calls_used == 1
+
+
+def test_retry_transient_errors_only():
+    ok = RetryingLLM(FlakyLLM(2, TimeoutError("slow"), ["out"]), max_retries=3, base_delay_s=0)
+    assert ok.generate([]) == "out" and ok.llm.calls == 3
+    exhausted = RetryingLLM(FlakyLLM(9, TimeoutError("slow"), ["out"]), max_retries=2, base_delay_s=0)
+    with pytest.raises(TimeoutError):
+        exhausted.generate([])
+    assert exhausted.llm.calls == 3
+    permanent = RetryingLLM(FlakyLLM(9, ValueError("context too long"), ["out"]), base_delay_s=0)
+    with pytest.raises(ValueError):
+        permanent.generate([])
+    assert permanent.llm.calls == 1  # 重试也没用的错误不重试
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
