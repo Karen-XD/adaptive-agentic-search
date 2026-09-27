@@ -4,10 +4,31 @@
 
 ## 当前位置
 
-**Day 2 ✅ 已完成（2026-09-27）。下一步：Day 3 下载 Qwen2.5-3B-Instruct，用 vLLM 起模型服务，跑 Direct 和 Static RAG 两个基线。**
+**Day 2 ✅ 已完成（2026-09-27）。Qwen2.5-3B-Instruct 已下载并校验（6.17GB，`/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct`，对话模板含 `tool_call`）。**
 
-检索服务在 tmux 会话 `retriever` 里运行（端口 8100）；实例重启后要重新启动：
-`tmux new -s retriever` → `conda activate dsr1 && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100`
+**下一步：Day 3** —— 用 vLLM 起模型服务 → 先拿 5～10 道 debug 题看模型原始输出（重点看格式有效率、`role="tool"` 在 Qwen 模板里怎么渲染）→ 跑 Direct（不检索）和 Static RAG（固定搜一次）两个基线。
+
+### 🔌 服务器重启后的恢复清单（2026-09-27 关机前写）
+
+关机（非释放实例）后两个盘都在，代码、数据、索引、模型、记忆文件都还在；**只有 tmux 会话会消失**。
+
+```bash
+# 1. 确认资产都在（应输出 3 行都存在）
+ls -d /root/autodl-tmp/adaptive-agentic-search/data/hotpotqa/v1 \
+      /root/autodl-tmp/adaptive-agentic-search/indexes/hotpot_pool_v1_bm25 \
+      /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct
+
+# 2. 重启检索服务（Day 3 跑实验前必须启动）
+tmux new -d -s retriever "source /root/miniconda3/etc/profile.d/conda.sh && conda activate dsr1 \
+  && cd /root/adaptive-agentic-search \
+  && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100"
+curl -s http://127.0.0.1:8100/health   # 应返回 num_docs: 507494
+
+# 3. 自检
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 53 passed
+```
+
+若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
 
@@ -26,6 +47,7 @@
 | HotpotQA 原始数据（360MB） | `data/raw/hotpotqa_distractor/` | 从 hf-mirror 下载，sha256 见 manifest |
 | 语料池 + 划分 + 清单（270MB） | `data/hotpotqa/v1/` | `python -m data_prep.prepare_hotpot` |
 | BM25 索引（449MB） | `indexes/hotpot_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_bm25` |
+| Qwen2.5-3B-Instruct（6.17GB） | `/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct/` | `bash /root/Search-R1/download_model_modelscope.sh`（ModelScope + aria2c，约 5 分钟） |
 
 ## Day 1 子步骤
 
@@ -98,7 +120,6 @@
 
 ## 待办 / 开放问题
 
-- Qwen2.5-3B-Instruct 需要重新下载（原先在数据盘上，已丢失），最晚 Day 3 前完成。
 - 观察结果用 `role="tool"` 拼回，Day 3 接真模型时要核对 Qwen2.5 对话模板的实际渲染（是否包进 `<tool_response>`）。
 - 服务整体挂掉时（连续失败 N 次）应提前中止整个实验，Day 3 接真服务时加。
 - Day 3 接真模型时：`config.yaml` 补模型名、解码参数（temperature、max_tokens）、torch / vllm / transformers 版本；真实客户端的超时、断连异常要映射到 `RetryingLLM` 的可重试类型。
