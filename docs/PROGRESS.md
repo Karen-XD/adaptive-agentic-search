@@ -4,7 +4,10 @@
 
 ## 当前位置
 
-**Day 2 进行中：数据、BM25 索引、检索服务都已完成；下一步用检索服务跑一次端到端实验（规则假模型 + BM25 + debug 集），然后 Day 2 收尾。**
+**Day 2 ✅ 已完成（2026-09-27）。下一步：Day 3 下载 Qwen2.5-3B-Instruct，用 vLLM 起模型服务，跑 Direct 和 Static RAG 两个基线。**
+
+检索服务在 tmux 会话 `retriever` 里运行（端口 8100）；实例重启后要重新启动：
+`tmux new -s retriever` → `conda activate dsr1 && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100`
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
 
@@ -13,7 +16,7 @@
 - [x] 2.1 数据：从 HotpotQA distractor 原始数据重建语料池（507,494 段）+ test 500 / validation 200 / debug 50 + 数据清单；`validate_splits` 通过
 - [x] 2.2 BM25 索引（bm25s + 英文词干化，建索引 59s、449MB）；检索体检：原问题搜一次，前 3 条找齐两个金标只有 28%（桥接题前 20 条也只有 50%）
 - [x] 2.3 检索服务（FastAPI `/health` `/search`）+ HTTP 客户端；实验入口支持 mock / bm25 / http 三种检索、题目与答案分文件读取、证据召回指标
-- [ ] 2.4 端到端运行：检索服务 + `configs/bm25_debug.yaml`
+- [x] 2.4 端到端运行：检索服务 + `configs/bm25_debug.yaml` → `20260927-224225-bm25-debug`（commit `84c096e`）：证据召回 0.61，金标全部找齐 0.30，检索耗时中位数 10ms；准确率 0.02 无意义（规则假模型）
 - 测试 53 个通过（新增 `tests/test_retriever.py`）
 
 ## 数据与索引位置（不进 git，实例释放会丢，可用脚本重建）
