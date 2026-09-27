@@ -1,7 +1,7 @@
 """实验入口：读配置 → 锁定代码版本 → 逐题跑 Agent → 评测 → 写 outputs/runs/<run_id>/。
 
 用法：python -m evaluation.run_eval --config configs/mock_v1.yaml [--allow-dirty]
-标准答案只在评测这一步读取，不传给 Agent 和检索工具。
+题目文件（只有 qid + question）交给 Agent；答案文件只在评测这一步读取，不传给 Agent 和检索工具。
 """
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ from agent.llm import RetryingLLM, SearchThenTitleLLM
 from agent.loop import run_episode
 from agent.schema import Budget, ErrorCode, StopReason
 from evaluation.qa_metrics import aggregate, exact_match
+from retrieval.bm25 import BM25SearchTool
+from retrieval.client import HttpSearchTool
 from retrieval.mock import MockSearchTool
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,8 +43,18 @@ def build_llm(cfg: dict):
 
 def build_tool(cfg: dict):
     if cfg["type"] == "mock":
-        return MockSearchTool()
+        return MockSearchTool(), {"source": "mock"}
+    if cfg["type"] == "bm25":  # 进程内加载索引，适合调试
+        tool = BM25SearchTool(ROOT / cfg["index"])
+        return tool, {"source": tool.source, "index": tool.meta}
+    if cfg["type"] == "http":  # 连检索服务，正式实验用这个；先问 /health，确认连的是哪个索引
+        tool = HttpSearchTool(cfg["url"], cfg.get("timeout_s", 5.0))
+        return tool, tool.health()
     raise ValueError(f"unknown retrieval type: {cfg['type']}")
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def main() -> None:
@@ -67,31 +79,44 @@ def main() -> None:
         (out / "git_diff.patch").write_text(f"# git status\n{status}\n# git diff HEAD\n{_git('diff', 'HEAD')}",
                                             encoding="utf-8")
 
+    budget = Budget(**cfg["budget"])
+    llm = RetryingLLM(build_llm(cfg["llm"]), **cfg["llm"].get("retry", {}))
+    tool, retrieval_info = build_tool(cfg["retrieval"])
+    data_dir = ROOT / cfg["data"]["dir"]
+    split = cfg["data"]["split"]
+    questions = read_jsonl(data_dir / "questions" / f"{split}.jsonl")
+    manifest_path = data_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+
     # 结果由 代码 + 配置 + 数据 + 环境 共同决定，四样都记下
     random.seed(cfg["seed"])
     cfg["run"] = {
         "run_id": run_id, "started_at": datetime.now().isoformat(timespec="seconds"),
         "git_commit": commit, "dirty": dirty, "argv": sys.argv,
+        "data_manifest": manifest, "retrieval": retrieval_info,
         "env": {"python": platform.python_version(), "platform": platform.platform(),
-                **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml")}},
+                **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml", "bm25s")}},
     }
     (out / "config.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    budget = Budget(**cfg["budget"])
-    llm = RetryingLLM(build_llm(cfg["llm"]), **cfg["llm"].get("retry", {}))
-    tool = build_tool(cfg["retrieval"])
-    items = [json.loads(line) for line in (ROOT / cfg["data"]["path"]).read_text(encoding="utf-8").splitlines()
-             if line.strip()]
+    trajectories = [run_episode(q["qid"], q["question"], llm, tool, budget) for q in questions]
 
+    # ---- 以下是评测：这时才读答案文件 ----
+    labels = {l["qid"]: l for l in read_jsonl(data_dir / "labels" / f"{split}.jsonl")}
     records = []
     with open(out / "trajectories.jsonl", "w", encoding="utf-8") as f:
-        for item in items:
-            traj = run_episode(item["qid"], item["question"], llm, tool, budget)  # 不传标准答案
-            correct = exact_match(traj.final_answer, item["answer"])            # 只有评测这一步读标准答案
+        for traj in trajectories:
+            label = labels[traj.qid]
+            correct = exact_match(traj.final_answer, label["answer"])
             state = traj.budget_state
+            # 证据召回：整条轨迹检索到的段落里，覆盖了几个金标段落。把"搜得好不好"和"答得好不好"分开
+            retrieved = {d.doc_id for s in traj.steps if s.observation is not None for d in s.observation.docs}
+            gold_ids = set(label.get("gold_doc_ids", []))
             records.append({
-                "qid": item["qid"], "correct": correct, "error": traj.stop_reason == StopReason.ERROR,
-                "stop_reason": traj.stop_reason.value, "prediction": traj.final_answer, "gold": item["answer"],
+                "qid": traj.qid, "correct": correct, "error": traj.stop_reason == StopReason.ERROR,
+                "stop_reason": traj.stop_reason.value, "prediction": traj.final_answer, "gold": label["answer"],
+                "type": label.get("type"),
+                "evidence_recall": len(gold_ids & retrieved) / len(gold_ids) if gold_ids else None,
                 "turns": state.turns_used, "search_calls": state.search_calls_used,
                 "search_attempts": state.search_attempts,
                 "new_docs": sum(s.num_new_docs for s in traj.steps),
@@ -99,7 +124,9 @@ def main() -> None:
                                      if s.observation is not None and s.observation.error_code in FORMAT_ERRORS),
                 "error_message": traj.error,
             })
-            f.write(json.dumps({**traj.model_dump(mode="json"), "eval": {"gold": item["answer"], "em": correct}},
+            f.write(json.dumps({**traj.model_dump(mode="json"),
+                                "eval": {"gold": label["answer"], "em": correct,
+                                         "gold_doc_ids": sorted(gold_ids), "evidence_recall": records[-1]["evidence_recall"]}},
                                ensure_ascii=False) + "\n")
 
     metrics = aggregate(records)
@@ -107,8 +134,8 @@ def main() -> None:
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # errors.csv：没答对的题都进来，按类别分开，方便 badcase 分析
-    fields = ["qid", "category", "stop_reason", "prediction", "gold", "turns", "search_calls",
-              "format_errors", "error_message"]
+    fields = ["qid", "type", "category", "stop_reason", "prediction", "gold", "evidence_recall", "turns",
+              "search_calls", "format_errors", "error_message"]
     with open(out / "errors.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         w.writeheader()

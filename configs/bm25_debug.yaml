@@ -1,0 +1,22 @@
+# Day 2 流程验证：规则假模型 + 真 BM25 检索 + HotpotQA 调试集。
+# 准确率没有意义（假模型把第一条结果的标题当答案），证据召回有意义：它就是"拿原问题搜一次"的效果。
+name: bm25-debug
+seed: 42
+
+data:
+  dir: data/hotpotqa/v1
+  split: debug
+
+llm:
+  type: search_then_title
+  retry: {max_retries: 3, base_delay_s: 1.0}
+
+retrieval:
+  type: http  # 先启动检索服务：python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100
+  url: http://127.0.0.1:8100
+  timeout_s: 5.0
+
+budget:
+  max_turns: 5
+  max_search_calls: 3
+  top_k: 3

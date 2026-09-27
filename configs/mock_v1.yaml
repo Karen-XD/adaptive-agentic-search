@@ -3,8 +3,8 @@ name: mock-v1
 seed: 42
 
 data:
-  path: data_prep/mock/qa.jsonl
-  split: mock  # 正式实验只能是 validation / test；阈值和提示词只在 validation 上调
+  dir: data_prep/mock  # questions/<split>.jsonl 给 Agent，labels/<split>.jsonl 只给评测器
+  split: mock          # 正式实验只能是 validation / test；阈值和提示词只在 validation 上调
 
 llm:
   type: search_then_title  # Day 3 换成真模型，并在这里记模型名和解码参数（temperature、max_tokens）

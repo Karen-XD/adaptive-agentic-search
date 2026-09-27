@@ -47,4 +47,16 @@ def aggregate(records: list[dict]) -> dict:
         "format_error_rate": sum(r["format_errors"] for r in records) / total_turns if total_turns else 0.0,
         "mean_new_docs_per_call": sum(r["new_docs"] for r in records) / total_calls if total_calls else 0.0,
         "stop_reasons": dict(Counter(r["stop_reason"] for r in records)),
+        **_evidence_metrics(records),
+    }
+
+
+def _evidence_metrics(records: list[dict]) -> dict:
+    with_gold = [r for r in records if r.get("evidence_recall") is not None]
+    if not with_gold:
+        return {}
+    return {
+        "evidence_recall": sum(r["evidence_recall"] for r in with_gold) / len(with_gold),
+        # 多跳题要把所有金标段落都找齐才可能答对，这个比平均召回更能说明问题
+        "all_evidence_found": sum(r["evidence_recall"] == 1.0 for r in with_gold) / len(with_gold),
     }

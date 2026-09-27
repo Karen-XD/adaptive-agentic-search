@@ -31,5 +31,12 @@ def test_failed_questions_stay_in_denominator():
     assert m["stop_reasons"] == {"answered": 2, "no_answer": 1, "error": 1}
 
 
+
+def test_evidence_metrics():
+    recs = [{**_rec(False, "answered"), "evidence_recall": r} for r in (1.0, 0.5, 0.0, None)]
+    m = aggregate(recs)
+    assert m["evidence_recall"] == 0.5          # 没有金标的题（None）不计入
+    assert m["all_evidence_found"] == 1 / 3
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

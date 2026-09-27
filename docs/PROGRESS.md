@@ -4,11 +4,25 @@
 
 ## 当前位置
 
-**Day 1 ✅ 已完成（2026-09-27）。下一步：Day 2 BM25 检索服务与语料 ID。**
-
-Day 2 要做：① 核查旧 `hotpotqa_corpus.jsonl` 的构造方式（是否只含 gold 段落）；② 建 BM25 索引并封装成 `search(query, top_k)`，接口与 `retrieval/mock.py` 一致；③ 为每个段落生成稳定 ID；④ 准备调试题并写数据清单。
+**Day 2 进行中：数据、BM25 索引、检索服务都已完成；下一步用检索服务跑一次端到端实验（规则假模型 + BM25 + debug 集），然后 Day 2 收尾。**
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 2 子步骤
+
+- [x] 2.1 数据：从 HotpotQA distractor 原始数据重建语料池（507,494 段）+ test 500 / validation 200 / debug 50 + 数据清单；`validate_splits` 通过
+- [x] 2.2 BM25 索引（bm25s + 英文词干化，建索引 59s、449MB）；检索体检：原问题搜一次，前 3 条找齐两个金标只有 28%（桥接题前 20 条也只有 50%）
+- [x] 2.3 检索服务（FastAPI `/health` `/search`）+ HTTP 客户端；实验入口支持 mock / bm25 / http 三种检索、题目与答案分文件读取、证据召回指标
+- [ ] 2.4 端到端运行：检索服务 + `configs/bm25_debug.yaml`
+- 测试 53 个通过（新增 `tests/test_retriever.py`）
+
+## 数据与索引位置（不进 git，实例释放会丢，可用脚本重建）
+
+| 内容 | 路径 | 重建命令 |
+|---|---|---|
+| HotpotQA 原始数据（360MB） | `data/raw/hotpotqa_distractor/` | 从 hf-mirror 下载，sha256 见 manifest |
+| 语料池 + 划分 + 清单（270MB） | `data/hotpotqa/v1/` | `python -m data_prep.prepare_hotpot` |
+| BM25 索引（449MB） | `indexes/hotpot_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_bm25` |
 
 ## Day 1 子步骤
 
@@ -42,7 +56,7 @@ Day 2 要做：① 核查旧 `hotpotqa_corpus.jsonl` 的构造方式（是否只
 
 | 日期 | 决策 | 原因 |
 |---|---|---|
-| 2026-09-25 | 不用 wiki-18 全量语料，采用可控 HotpotQA 语料池 | wiki-18 约 2100 万段落，e5 Flat 向量索引约 64GB，超过 50G 数据盘；与 plan §0.2 一致 |
+| 2026-09-25 | 不用 wiki-18 全量语料，采用可控 HotpotQA 语料池 | ~~wiki-18 向量索引约 64GB，超过 50G 数据盘~~ → 2026-09-27 更新：数据盘可扩容，磁盘不再是理由；仍先用语料池，因为迭代快、符合 plan 分阶段设计；Day 20 左右扩容后用 HotpotQA fullwiki（约 520 万段）做鲁棒性验证 |
 | 2026-09-25 | 环境分工（默认方案，用户可改）：`verl_env` 负责 vLLM 模型服务和 V3 RL；`dsr1` 跑项目代码；`search-agent` 暂不用 | 两个现成环境都能用 GPU；不往 RL 环境装新包以免破坏依赖；`dsr1` 在系统盘，会随镜像保存 |
 | 2026-09-27 | 动作文字格式采用 Qwen2.5 原生 `<tool_call>{JSON}</tool_call>` | 标签负责定位和停止，JSON 负责多参数和明确报错；V1/V2 不训练模型，顺着模型已有习惯；Day 3 统计格式有效率再确认 |
 | 2026-09-27 | 解析只看本轮新生成内容；训练、评测、推理共用同一个解析器 | `infer.py` 解析整段文本导致静默出错；训练和推理两套解析 = train-serve skew |
@@ -62,6 +76,14 @@ Day 2 要做：① 核查旧 `hotpotqa_corpus.jsonl` 的构造方式（是否只
 | 2026-09-27 | `errors.csv` 收录所有没答对的题，分 model_error / no_answer / wrong_answer；`trajectories.jsonl` 每行 = 轨迹 + `eval`（gold、em） | 错题分析的入口；gold 只在评测后写入输出文件，不进 prompt |
 | 2026-09-27 | 数据处理目录沿用 `data_prep/`，不按 plan 改名为 `datasets/` | 仓库根目录下的 `datasets/` 会遮住 HuggingFace `datasets` 库的导入 |
 | 2026-09-27 | 新增 `docs/PROJECT_OVERVIEW.md`（项目全景），每个阶段更新 | 用户要求宏观优先，便于面试准备 |
+| 2026-09-27 | 旧 `hotpotqa_corpus.jsonl` 不复用，从原始数据重建 | 旧语料只收了 4500 道被选中题目的上下文（考哪些题决定库里有什么），且没保存金标段落，无法算证据召回 |
+| 2026-09-27 | 语料池 = train + 官方 dev 全部题目的上下文段落，按标题去重（1821 个标题有多版本，相似度中位数 0.998，留出现最多的）；`doc_id` = 标题哈希 | 语料由整个数据集决定、不依赖抽到哪些题；同一段落的多个版本会重复占用 top_k 名额；标题唯一所以 ID 可复现 |
+| 2026-09-27 | test = 官方 dev 抽 500；validation 200 / debug 50 从 train 的 hard 题抽 | 官方 dev 全是 hard 题，调参集分布要和测试集一致；官方 test 没有公开答案 |
+| 2026-09-27 | 每个划分拆成 `questions/`（只有 qid + question）和 `labels/`（答案、类型、金标段落）两个文件 | 防泄漏落到文件结构上：Agent 只读题目文件，评测器才读答案文件；`validate_splits` 检查题目文件没有多余字段 |
+| 2026-09-27 | 不做 NQ 调试集 | NQ 是单跳维基问答，HotpotQA 语料池里大多没有它的答案；调试改用 HotpotQA debug 集。偏离 plan §4.1 |
+| 2026-09-27 | BM25 用 bm25s（默认 k1=1.5, b=0.75）+ 英文停用词 + 词干化；标题和正文一起建索引；同分按 doc_id 排序 | 标题就是实体名，是最强信号；词干化与 Pyserini 默认一致；同分排序保证结果可复现 |
+| 2026-09-27 | 检索做成独立服务，正式实验走 HTTP；客户端超时 5s，异常交给循环记 tool_error | 索引只加载一次、多实验共用；之后换向量检索不影响 Agent；记录真实接口耗时 |
+| 2026-09-27 | 新增证据召回指标：`evidence_recall`（平均覆盖金标比例）、`all_evidence_found`（金标全部找齐的比例） | 把"搜得好不好"和"答得好不好"分开，是 V2 比较路由策略的核心指标 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -74,7 +96,6 @@ Day 2 要做：① 核查旧 `hotpotqa_corpus.jsonl` 的构造方式（是否只
 ## 待办 / 开放问题
 
 - Qwen2.5-3B-Instruct 需要重新下载（原先在数据盘上，已丢失），最晚 Day 3 前完成。
-- 旧的 `hotpotqa_corpus.jsonl` 是怎么构造的？复用前要核查是否只含 gold 段落（防泄漏，plan §4.1）。Day 2 处理。
 - 观察结果用 `role="tool"` 拼回，Day 3 接真模型时要核对 Qwen2.5 对话模板的实际渲染（是否包进 `<tool_response>`）。
 - 服务整体挂掉时（连续失败 N 次）应提前中止整个实验，Day 3 接真服务时加。
 - Day 3 接真模型时：`config.yaml` 补模型名、解码参数（temperature、max_tokens）、torch / vllm / transformers 版本；真实客户端的超时、断连异常要映射到 `RetryingLLM` 的可重试类型。

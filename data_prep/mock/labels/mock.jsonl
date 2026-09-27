@@ -1,0 +1,5 @@
+{"qid": "q-mock-01", "answer": "Tessa Marrow", "gold_doc_ids": ["mock-001"]}
+{"qid": "q-mock-02", "answer": "Port Edvik", "gold_doc_ids": ["mock-001", "mock-002"]}
+{"qid": "q-mock-03", "answer": "1975", "gold_doc_ids": ["mock-002"]}
+{"qid": "q-mock-04", "answer": "lighthouse", "gold_doc_ids": ["mock-003"]}
+{"qid": "q-mock-05", "answer": "Marrow Industries", "gold_doc_ids": ["mock-005"]}
