@@ -74,6 +74,19 @@ def test_static_rag_retrieval_failure_still_answers():
     assert traj.final_answer == "Port Edvik" and traj.budget_state.search_calls_used == 1
 
 
+def test_format_hint_matches_available_tools():
+    # 只能作答的方法没有 search 工具，报错里的正确写法也不能提 search
+    traj, llm = run("direct", outputs=["The answer is Port Edvik.", ANSWER])
+    message = traj.steps[0].observation.message
+    assert traj.steps[0].observation.error_code == ErrorCode.NO_ACTION
+    assert '"name": "final_answer"' in message and "search" not in message
+    assert llm.seen_messages[1][-1] == {"role": "tool", "content": message}
+
+    traj, _ = run("agent", outputs=["The answer is Port Edvik.", ANSWER], tool=SpyTool())
+    message = traj.steps[0].observation.message
+    assert message.index('"name": "final_answer"') < message.index('"name": "search"')  # 先给作答的写法
+
+
 def test_oracle_gets_gold_docs_and_no_search_cost():
     gold = [Doc(doc_id="d1", title="Tessa Marrow", text="Born in Port Edvik.", score=0.0, rank=1, source="oracle")]
     traj, llm = run("oracle", gold_docs=gold)

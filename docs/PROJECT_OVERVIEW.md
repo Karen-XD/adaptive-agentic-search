@@ -127,10 +127,13 @@ python -m experiments.day3_prompt_format_probe               # Day 3.2 提示词
 
 # 跑实验（要求代码已提交；--limit N 只跑前 N 题，调试用）
 python -m evaluation.run_eval --config configs/bm25_debug.yaml               # 规则假模型 + 真检索
-python -m evaluation.run_eval --config configs/qwen3b_direct_debug.yaml      # B0 Direct（要先起 vLLM）
-python -m evaluation.run_eval --config configs/qwen3b_static_rag_debug.yaml  # B1 Static RAG（还要起检索服务）
-python -m evaluation.run_eval --config configs/qwen3b_agent_debug.yaml       # Agent
-python -m evaluation.run_eval --config configs/qwen3b_oracle_debug.yaml      # Oracle 诊断上限（只许 validation / debug）
+# 四种方法，默认跑 debug；--split validation 跑验证集；test 要加 --final（只在最后评测时跑一次）
+python -m evaluation.run_eval --config configs/qwen3b_direct.yaml --split validation      # B0 Direct（要先起 vLLM）
+python -m evaluation.run_eval --config configs/qwen3b_static_rag.yaml --split validation  # B1 Static RAG（还要起检索服务）
+python -m evaluation.run_eval --config configs/qwen3b_agent.yaml --split validation       # Agent
+python -m evaluation.run_eval --config configs/qwen3b_oracle.yaml --split validation      # Oracle 诊断上限（拒绝 test）
+bash experiments/run_baselines.sh validation                                                # 四种方法依次跑完
+python -m experiments.day3_query_rewrite_analysis outputs/runs/<agent 运行>                 # 查询改写得失
 ```
 
 一次运行会在 `outputs/runs/<时间>-<名字>/` 下生成：
@@ -150,7 +153,7 @@ python -m evaluation.run_eval --config configs/qwen3b_oracle_debug.yaml      # O
 | `agent/` | 数据结构、解析器、循环、提示词、模型接口、四种方法（`methods.py`） | Day 1 完成；Day 3 接入 vLLM 客户端、原生工具提示词、基线方法 |
 | `retrieval/` | 检索工具：假检索、BM25、检索服务和客户端 | Day 2 完成；V2 加向量检索、混合检索、重排 |
 | `evaluation/` | 评测指标（EM、F1、证据召回、成本）、实验入口、Oracle 金标读取 | Day 3 补齐基线所需指标 |
-| `configs/` | 实验配置 | `qwen3b_debug_base.yaml` + 四个继承它的方法配置；`mock_v1.yaml`、`bm25_debug.yaml` |
+| `configs/` | 实验配置 | `qwen3b_base.yaml` + 四个继承它的方法配置（划分由 `--split` 指定）；`mock_v1.yaml`、`bm25_debug.yaml` |
 | `data_prep/` | 数据准备、数据体检 | HotpotQA 完成 |
 | `data/`、`indexes/` | 数据和索引（不进 git） | HotpotQA 语料池 + BM25 索引 |
 | `tests/` | 自动测试 | 95 个 |

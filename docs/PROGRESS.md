@@ -67,7 +67,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 3.4 B0 Direct / B1 Static RAG / Oracle 诊断；补 Token-F1、输入输出 token 数、P50/P95 延迟（2026-09-28）
   - `agent/methods.py`：四种方法共用循环、解析器、Budget；只能作答的三种方法提示词一字不差，只差证据
   - `evaluation/oracle.py`：评测侧读金标段落，拒绝 test；`CLAUDE.md` 记下这个例外（用户同意）
-  - 配置改成 `qwen3b_debug_base.yaml` + 四个 `extends` 它的方法配置，解码参数、数据、预算只写一处
+  - 配置改成基础配置 + 四个 `extends` 它的方法配置，解码参数、数据、预算只写一处（3.5 起改名为 `qwen3b_base.yaml` / `qwen3b_<方法>.yaml`）
   - 测试 72 → 95，三处改坏检查都能抓到（Static RAG 不计成本、Oracle 不排序/放行 test、Direct 用错提示词）
   - 正式运行（commit `cc0b7c1`，debug 50 题，只用于调试，不出结论）：
 

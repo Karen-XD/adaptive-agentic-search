@@ -100,10 +100,16 @@ def main() -> None:
     ap.add_argument("--config", required=True)
     ap.add_argument("--allow-dirty", action="store_true", help="调试用：允许在有未提交改动时运行，结果目录带 -dirty 后缀")
     ap.add_argument("--limit", type=int, help="调试用：只跑前 N 题（写进 config.yaml 的 argv，结果不能当正式结论）")
+    ap.add_argument("--split", help="覆盖配置里的 data.split（同一份方法配置跑 debug / validation / test）")
+    ap.add_argument("--final", action="store_true", help="跑 test 集必须加：test 只在最后评测时跑，平时误跑会让人忍不住按它调参")
     args = ap.parse_args()
     cfg = load_config(Path(args.config))
     if "name" not in cfg:
         sys.exit("配置里没有 name：基础配置不能直接运行，请运行继承它的方法配置")
+    if args.split:
+        cfg["data"]["split"] = args.split
+    if cfg["data"]["split"] == "test" and not args.final:
+        sys.exit("test 集只在最后评测时跑一次；确认要跑请加 --final。调参请用 --split validation。")
     method = cfg.setdefault("method", "agent")
     budget = Budget(**cfg["budget"])
     check_budget(method, budget)  # 在建输出目录之前就检查，配错了不留半成品
@@ -115,7 +121,7 @@ def main() -> None:
     dirty = bool(status.strip())
     if dirty and not args.allow_dirty:
         sys.exit("工作区有未提交的改动，commit hash 无法代表本次代码。请先提交，或加 --allow-dirty 调试运行。")
-    run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{cfg['name']}" + ("-dirty" if dirty else "")
+    run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{cfg['name']}-{cfg['data']['split']}" + ("-dirty" if dirty else "")
     out = ROOT / "outputs" / "runs" / run_id
     out.mkdir(parents=True)
     commit = _git("rev-parse", "HEAD").strip()

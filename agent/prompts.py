@@ -19,22 +19,33 @@ SYSTEM_PROMPT = native_system_prompt(TASK, TOOLS)
 FORCED_ANSWER_NOTICE = ("No more searches are allowed. Call final_answer now "
                         "with your best answer based on the information above.")
 
+# 格式出错时附在报错里的正确写法。先给作答：纯文字写出答案、忘了调用是最常见的格式错误，
+# 旧提示先举 search 的例子，模型就又去搜了一遍（3.5 在 debug 上数到 4 次，其中一题因此没答上）
+AGENT_FORMAT_HINT = ("Use exactly one tool call per turn. If you know the answer, call "
+                     '<tool_call>{"name": "final_answer", "arguments": {"answer": "..."}}</tool_call>; '
+                     'if you need more information, call '
+                     '<tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call>')
+
 # 只能作答（B0 Direct / B1 Static RAG / Oracle 共用）：同一种原生写法，只是不给 search 工具。
 # 三者只差用户消息里有没有、有什么证据，提示词一字不差，比较的才是"证据"这一个变量
 ANSWER_ONLY_TASK = ("Answer the question. If documents are provided, base your answer on them. "
                     "Call final_answer with your answer.")
 ANSWER_ONLY_SYSTEM_PROMPT = native_system_prompt(ANSWER_ONLY_TASK, [FINAL_ANSWER_TOOL])
 ANSWER_ONLY_FORCED_NOTICE = "Call final_answer now with your best answer."
+# 这三种方法没有 search 工具，报错里不能举 search 的例子
+ANSWER_ONLY_FORMAT_HINT = ('Use exactly one tool call per turn: '
+                           '<tool_call>{"name": "final_answer", "arguments": {"answer": "..."}}</tool_call>')
 
 
 @dataclass(frozen=True)
 class Prompts:
     system: str
     forced_notice: str
+    format_hint: str
 
 
-AGENT_PROMPTS = Prompts(SYSTEM_PROMPT, FORCED_ANSWER_NOTICE)
-ANSWER_ONLY_PROMPTS = Prompts(ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_FORCED_NOTICE)
+AGENT_PROMPTS = Prompts(SYSTEM_PROMPT, FORCED_ANSWER_NOTICE, AGENT_FORMAT_HINT)
+ANSWER_ONLY_PROMPTS = Prompts(ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_FORCED_NOTICE, ANSWER_ONLY_FORMAT_HINT)
 
 
 def render_observation(obs: Observation) -> str:

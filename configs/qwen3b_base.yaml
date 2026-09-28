@@ -1,6 +1,6 @@
-# 基础配置：Qwen2.5-3B-Instruct（vLLM）+ BM25 检索服务 + HotpotQA 调试集。不直接运行，由各方法的配置 extends。
+# 基础配置：Qwen2.5-3B-Instruct（vLLM）+ BM25 检索服务 + HotpotQA。不直接运行，由各方法的配置 extends。
 # 模型、解码参数、数据、预算只写在这里：同一组对比实验的这些条件必须完全一致，不靠人抄对。
-# debug 集只用来调试，不出结论；调参只在 validation 上做。
+# 划分默认 debug，用 --split validation 覆盖；debug 只用来调试，不出结论；调参只在 validation 上做；test 要加 --final。
 # 先起两个服务（docs/PROGRESS.md 恢复清单）：检索 8100、vLLM 8000。
 seed: 42
 

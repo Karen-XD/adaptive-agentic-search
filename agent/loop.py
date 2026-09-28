@@ -74,7 +74,7 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budg
         generated = gen.text
         state.turns_used += 1
 
-        parsed = parse_action(generated)  # 只传本轮新生成的内容
+        parsed = parse_action(generated, prompts.format_hint)  # 只传本轮新生成的内容
         action, obs = parsed.action, parsed.error
         tool_ms, num_new_docs = 0.0, 0
 

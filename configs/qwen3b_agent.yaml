@@ -1,4 +1,4 @@
 # Vanilla Agent：模型自己决定搜什么、搜几次（最多 3 次）。Day 4 的 B2 在它上面加固。
-extends: qwen3b_debug_base.yaml
-name: qwen3b-agent-debug
+extends: qwen3b_base.yaml
+name: qwen3b-agent
 method: agent

@@ -13,6 +13,7 @@ from typing import Optional
 
 from pydantic import TypeAdapter, ValidationError
 
+from agent.prompts import AGENT_FORMAT_HINT
 from agent.schema import TOOL_NAMES, Action, ErrorCode, Observation
 
 # Qwen2.5 原生工具调用格式：标签负责定位，JSON 负责内容
@@ -20,13 +21,6 @@ _TOOL_CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 # 结尾标签缺失：最后一个 <tool_call> 之后直到输出结束的全部内容
 _UNCLOSED_TAIL = re.compile(r"<tool_call>((?:(?!<tool_call>).)*)\Z", re.DOTALL)
 _ACTION = TypeAdapter(Action)
-
-# 出错时附在观察里给模型看，告诉它正确写法（提示词是英文，这里也用英文）
-_FORMAT_HINT = (
-    "Use exactly one tool call per turn, e.g. "
-    '<tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call> or '
-    '<tool_call>{"name": "final_answer", "arguments": {"answer": "..."}}</tool_call>'
-)
 
 
 @dataclass
@@ -38,12 +32,19 @@ class ParseResult:
 
 
 def _fail(code: ErrorCode, what: str, num_tool_calls: int = 0) -> ParseResult:
-    message = f"Invalid action: {what}. {_FORMAT_HINT}"
-    return ParseResult(error=Observation(ok=False, error_code=code, message=message),
+    return ParseResult(error=Observation(ok=False, error_code=code, message=f"Invalid action: {what}."),
                        num_tool_calls=num_tool_calls)
 
 
-def parse_action(generated: str) -> ParseResult:
+def parse_action(generated: str, format_hint: str = AGENT_FORMAT_HINT) -> ParseResult:
+    """解析规则所有方法都一样；只有报错时附的正确写法随方法可用的工具变（format_hint，见 agent/prompts.py）。"""
+    result = _parse(generated)
+    if result.error is not None:
+        result.error.message = f"{result.error.message} {format_hint}"
+    return result
+
+
+def _parse(generated: str) -> ParseResult:
     blocks = _TOOL_CALL.findall(generated)
     n = len(blocks)
 

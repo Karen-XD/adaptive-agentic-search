@@ -1,6 +1,6 @@
 # B0 Direct：不检索，只凭模型自己的知识作答。衡量"检索到底带来了多少"。
-extends: qwen3b_debug_base.yaml
-name: qwen3b-direct-debug
+extends: qwen3b_base.yaml
+name: qwen3b-direct
 method: direct
 retrieval: null
 budget: {max_search_calls: 0}
