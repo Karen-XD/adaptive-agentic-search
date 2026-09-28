@@ -173,6 +173,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - ~~服务整体挂掉时应提前中止~~ → 3.3 已加（连续 5 题）。
 - ~~`config.yaml` 补模型名、解码参数、版本；真实客户端异常映射到可重试类型~~ → 3.3 已完成。
 - 3.5 / validation 上再看：格式错误反馈里先举例 search，模型已经知道答案时也会被带去重搜（`5ae3fd6d` 第 3→4 轮）。改提示词只在 validation 上做。
+- 错因拆分（`20260928-212118`，debug 50 题）：答错 36 题中 26 题证据没找齐、10 题证据齐了仍答错；这 10 题约 5 题是 EM 口径（意思对）、1 题标签问题、约 4 题真读错 → 当前瓶颈主要在检索。
+- 候选诊断：**Oracle context**（直接给金标段落，衡量纯阅读能力上限）。它要把 labels 里的金标段落放进 prompt，和"标签只给评测器"的防泄漏规则冲突 → 只能作为明确标注的诊断上限、只在 validation/debug 上跑、不作为方法参与比较；**实现前先和用户确认这个例外**。
+- 候选消融：模型尺寸（Qwen2.5-3B vs 7B，7B bf16 权重约 15GB，4090 能放下；14B 需要量化）。放在 Oracle 设定下比较才能测纯阅读能力；建议 Day 5～6 基线表定下来后再做。
 - 答案常写成句子或带多余修饰（"Atlanta" vs "Atlanta, Georgia"、答比较题时写年份），EM 偏严 → 3.4 补 Token-F1。
 - Direct 基线怎么配：`max_search_calls=0` 时提示词仍说可以搜，模型想搜会浪费一轮并被记成 forced_answer。Day 3 决定是用 `max_turns=1`，还是给 Direct 单独一份不带工具的提示词。
 - ~~轨迹还没记录观察的 token 数~~ → 每轮记了服务端的 `prompt_tokens`，观察 token 由相邻两轮差值得到（见决策记录）。
