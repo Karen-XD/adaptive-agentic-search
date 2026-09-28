@@ -62,6 +62,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - runner：`type: vllm`、`--limit N`、连续 5 题模型服务失败就中止、`config.yaml` 记模型目录 / 服务端 vllm·torch·transformers 版本 / 系统提示词原文 / 预热耗时、`metrics` 记重试次数
   - `configs/qwen3b_agent_debug.yaml`；测试 53 → 72
   - debug 前 8 题（调试运行）：第一轮格式 8/8，但看到检索结果后 5/20 轮格式错，其中 4 个是 JSON 完整、漏了 `</tool_call>`（关停止词重放也一样，是模型自己输出了结束符）→ 解析器放宽这一种情况后格式错误率 18% → 4%，没作答 2 → 0
+  - **正式运行 `20260928-212118-qwen3b-agent-debug`**（commit `bed5236`，debug 全 50 题，96s）：EM 0.28（宽松包含匹配 0.44）、证据召回 0.66、金标全部找齐 0.42、格式错误率 4.9%（补上结尾标签 8 次）、平均实际搜索 1.86 次；停止原因 answered 40 / forced 9 / no_answer 1；每题输入 token 中位数 2031、输出 162；每题端到端 P50 1.6s、P95 3.7s。**证据找齐的 21 题里仍答错 10 题** → 瓶颈不只在检索。debug 集只用于调试，数字不进结论
   - 贪心解码对输入极敏感：同一道题去掉数据里原有的末尾空格，第一轮查询就从 "Mary Gordon birth year" 变成两人合并的 "Mary Gordon birth year H. L. Mencken birth year" → Day 6 多 seed 看波动时要记住，单题结论不可靠
 - [ ] 3.4 B0 Direct / B1 Static RAG；补 Token-F1、输入输出 token 数、P50/P95 延迟
 - [ ] 3.5 人工看约 30 条轨迹，再批量跑 validation
