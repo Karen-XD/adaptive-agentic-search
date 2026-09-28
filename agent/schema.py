@@ -119,11 +119,15 @@ class Step(BaseModel):
     generated: str                           # 模型本轮原始输出，离线算宽松诊断指标要用
     forced: bool                             # 本轮是否只许作答
     num_tool_calls: int
+    unclosed_tool_call: bool = False         # 缺 </tool_call> 但 JSON 完整，按规则补上了（见 agent/parser.py）
     action: Optional[Action] = None          # 解析失败时为空
     observation: Optional[Observation] = None  # 作答那一轮没有观察
     num_new_docs: int = 0                    # 本轮检索结果里之前没见过的文档数，衡量这次搜索的边际收益
-    llm_latency_ms: float
+    llm_latency_ms: float                    # 含重试等待，是用户实际等的时间
     tool_latency_ms: float = 0.0
+    prompt_tokens: Optional[int] = None      # 本轮输入 token（整个上下文都要重新算，是多轮的主要成本）；假模型为 None
+    completion_tokens: Optional[int] = None  # 本轮输出 token
+    finish_reason: Optional[str] = None      # length = 写到 max_tokens 被截断，格式错误时先看它
     budget_state: BudgetState                # 本轮结束后的用量快照
 
 

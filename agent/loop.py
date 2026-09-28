@@ -53,12 +53,13 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
 
         t0 = time.perf_counter()
         try:
-            generated = llm.generate(messages)
+            gen = llm.generate(messages)
         except Exception as e:
             # 模型服务重试后仍失败：记成 error，已跑完的轮次照样保留；是否重试由 RetryingLLM 负责
             error, stop_reason = f"{type(e).__name__}: {e}", StopReason.ERROR
             break
         llm_ms = (time.perf_counter() - t0) * 1000
+        generated = gen.text
         state.turns_used += 1
 
         parsed = parse_action(generated)  # 只传本轮新生成的内容
@@ -96,13 +97,15 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
                 state.search_calls_used += 1
 
         steps.append(Step(turn=state.turns_used, generated=generated, forced=forced,
-                          num_tool_calls=parsed.num_tool_calls, action=action, observation=obs,
+                          num_tool_calls=parsed.num_tool_calls, unclosed_tool_call=parsed.unclosed,
+                          action=action, observation=obs,
                           num_new_docs=num_new_docs, llm_latency_ms=llm_ms, tool_latency_ms=tool_ms,
-                          budget_state=state.model_copy()))
+                          prompt_tokens=gen.prompt_tokens, completion_tokens=gen.completion_tokens,
+                          finish_reason=gen.finish_reason, budget_state=state.model_copy()))
         if answer is not None:
             break
         messages.append({"role": "assistant", "content": generated})
-        # role="tool"：Qwen2.5 的对话模板会把它包进 <tool_response>；Day 3 接真模型时核对渲染结果
+        # role="tool"：Qwen2.5 的对话模板把它渲染成 user 轮次 + <tool_response>…</tool_response>（3.2 已核对）
         messages.append({"role": "tool", "content": render_observation(obs)})
 
     return Trajectory(qid=qid, question=question, budget=budget, steps=steps, budget_state=state,

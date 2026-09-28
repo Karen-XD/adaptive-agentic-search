@@ -17,6 +17,8 @@ from agent.schema import TOOL_NAMES, Action, ErrorCode, Observation
 
 # Qwen2.5 原生工具调用格式：标签负责定位，JSON 负责内容
 _TOOL_CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+# 结尾标签缺失：最后一个 <tool_call> 之后直到输出结束的全部内容
+_UNCLOSED_TAIL = re.compile(r"<tool_call>((?:(?!<tool_call>).)*)\Z", re.DOTALL)
 _ACTION = TypeAdapter(Action)
 
 # 出错时附在观察里给模型看，告诉它正确写法（提示词是英文，这里也用英文）
@@ -32,6 +34,7 @@ class ParseResult:
     action: Optional[Action] = None      # 解析成功时有值
     error: Optional[Observation] = None  # 解析失败时有值，作为本轮观察拼回给模型
     num_tool_calls: int = 0              # 本轮写了几个 tool_call；只执行第一个，个数记进轨迹
+    unclosed: bool = False               # 缺结尾标签但按下面的规则补上了；记进轨迹，统计这类输出有多少
 
 
 def _fail(code: ErrorCode, what: str, num_tool_calls: int = 0) -> ParseResult:
@@ -47,12 +50,30 @@ def parse_action(generated: str) -> ParseResult:
     # 语法层：严格模式，没有 tool_call 的纯文字不当答案；所有方法共用这条规则
     if n == 0:
         if "<tool_call>" in generated:
+            # 唯一的放宽：缺 </tool_call>，但标签后面直到结尾恰好是一个完整的 JSON 对象，意图没有歧义，照常解析。
+            # Qwen2.5-3B 先写推理文字、再写调用时，常在 JSON 写完后直接结束（3.3 实测 5 个格式错误里 4 个是这样）。
+            # 输出被截断时 JSON 不完整，解析不了，仍然报错
+            tail = _UNCLOSED_TAIL.search(generated)
+            if tail and _is_json_object(tail.group(1)):
+                result = _parse_block(tail.group(1), 1)
+                result.unclosed = True
+                return result
             return _fail(ErrorCode.NO_ACTION, "found <tool_call> without a closing </tool_call>")
         return _fail(ErrorCode.NO_ACTION, "no tool call found")
+    return _parse_block(blocks[0], n)
 
+
+def _is_json_object(text: str) -> bool:
+    try:
+        return isinstance(json.loads(text), dict)
+    except json.JSONDecodeError:
+        return False
+
+
+def _parse_block(block: str, n: int) -> ParseResult:
     # 每轮只执行一个动作，取第一个（与 Search-R1 训练代码一致）
     try:
-        obj = json.loads(blocks[0])
+        obj = json.loads(block)
     except json.JSONDecodeError as e:
         return _fail(ErrorCode.INVALID_JSON, f"tool call is not valid JSON ({e.msg})", n)
 

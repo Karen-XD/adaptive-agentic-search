@@ -1,19 +1,17 @@
-"""提示词和观察的渲染。当前是占位版本，Day 3 起只在 validation 上调。
+"""提示词和观察的渲染。只在 validation 上调。
 
-提示词里的 tool_call 示例不会被误解析：解析器只看模型本轮新生成的内容（对比 infer.py 的问题）。
+系统提示词 = 任务说明 + Qwen2.5 原生工具说明（见 agent/native_tools.py：为什么用原生写法、为什么在代码里生成）。
+提示词里的 tool_call 格式说明不会被误解析：解析器只看模型本轮新生成的内容（对比 infer.py 的问题）。
 """
 from __future__ import annotations
 
+from agent.native_tools import FINAL_ANSWER_TOOL, SEARCH_TOOL, native_system_prompt
 from agent.schema import Observation
 
-SYSTEM_PROMPT = """Answer the question by searching a document collection.
-
-In every turn, think briefly, then call exactly one tool:
-- Search: <tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call>
-- Answer: <tool_call>{"name": "final_answer", "arguments": {"answer": "..."}}</tool_call>
-
-Search results are shown after each search. Search again if the information is not enough.
-The final answer should be a short phrase such as a name, date or number, not a sentence."""
+TASK = ("Answer the question by searching a document collection. Call exactly one function per turn. "
+        "Search again with different keywords if the information is not enough; call final_answer when you can answer.")
+TOOLS = [SEARCH_TOOL, FINAL_ANSWER_TOOL]
+SYSTEM_PROMPT = native_system_prompt(TASK, TOOLS)
 
 # 不训练的模型没法从奖励里学会"最后一轮不能搜"（Search-R1 靠 RL 学），只能明确告诉它
 FORCED_ANSWER_NOTICE = ("No more searches are allowed. Call final_answer now "

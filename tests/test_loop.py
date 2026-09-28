@@ -147,6 +147,30 @@ def test_qid_never_reaches_model_or_tool():
     assert spy.calls == [("Luminara Labs", 2)]
 
 
+class CostLLM(ScriptedLLM):
+    """带 token 数的假模型，检查成本是否按轮记进轨迹。"""
+
+    def generate(self, messages):
+        gen = super().generate(messages)
+        gen.prompt_tokens, gen.completion_tokens, gen.finish_reason = 100 * len(messages), 20, "stop"
+        return gen
+
+
+def test_tokens_recorded_per_step():
+    llm = CostLLM([call("search", query="Luminara Labs"), call("final_answer", answer="Port Edvik")])
+    traj = run_episode("q-001", Q, llm, MockSearchTool(), Budget())
+    # 第二轮上下文多了 assistant + tool 两条：多轮的输入 token 随轮数增长，是 Agent 的主要成本
+    assert [s.prompt_tokens for s in traj.steps] == [200, 400]
+    assert [s.completion_tokens for s in traj.steps] == [20, 20]
+    assert traj.steps[0].finish_reason == "stop"
+
+
+def test_scripted_llm_has_no_token_counts():
+    # 假模型没有 token 数：记 None 而不是 0，免得被统计成"零成本"
+    traj, _ = run([call("final_answer", answer="Port Edvik")])
+    assert traj.steps[0].prompt_tokens is None
+
+
 def test_trajectory_json_roundtrip():
     # 1.6 要从 JSONL 重放轨迹：序列化后必须能原样读回
     traj, _ = run([call("search", query="Luminara Labs"), "oops", call("final_answer", answer="Port Edvik")])
@@ -178,7 +202,7 @@ def test_model_error_recorded_and_steps_kept():
 
 def test_retry_transient_errors_only():
     ok = RetryingLLM(FlakyLLM(2, TimeoutError("slow"), ["out"]), max_retries=3, base_delay_s=0)
-    assert ok.generate([]) == "out" and ok.llm.calls == 3
+    assert ok.generate([]).text == "out" and ok.llm.calls == 3 and ok.num_retries == 2
     exhausted = RetryingLLM(FlakyLLM(9, TimeoutError("slow"), ["out"]), max_retries=2, base_delay_s=0)
     with pytest.raises(TimeoutError):
         exhausted.generate([])

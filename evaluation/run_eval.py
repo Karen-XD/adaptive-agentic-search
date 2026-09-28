@@ -18,8 +18,9 @@ from pathlib import Path
 
 import yaml
 
-from agent.llm import RetryingLLM, SearchThenTitleLLM
+from agent.llm import RetryingLLM, SearchThenTitleLLM, VLLMClient
 from agent.loop import run_episode
+from agent.prompts import SYSTEM_PROMPT
 from agent.schema import Budget, ErrorCode, StopReason
 from evaluation.qa_metrics import aggregate, exact_match
 from retrieval.bm25 import BM25SearchTool
@@ -28,6 +29,7 @@ from retrieval.mock import MockSearchTool
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_FAILURE_RATE = 0.02  # 模型服务失败率超过它，这次运行不能写进结论
+MAX_CONSECUTIVE_ERRORS = 5  # 连续这么多题模型服务都失败，多半是服务挂了，提前中止，别把剩下的题全记成 error
 FORMAT_ERRORS = {ErrorCode.NO_ACTION, ErrorCode.INVALID_JSON, ErrorCode.UNKNOWN_TOOL, ErrorCode.INVALID_ARGS}
 
 
@@ -35,9 +37,26 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
 
+def _package_versions(python: str, packages: tuple[str, ...]) -> dict:
+    """模型服务跑在另一个 conda 环境里（verl_env）：用那个环境的解释器读包版本。
+    vLLM 0.6.3 的 /version 接口因为缺版本文件只返回 "dev"，靠不住。只读元数据，不 import vllm。"""
+    code = ("import importlib.metadata as m, json; "
+            f"print(json.dumps({{p: m.version(p) for p in {list(packages)!r}}}))")
+    return json.loads(subprocess.run([python, "-c", code], capture_output=True, text=True, check=True).stdout)
+
+
 def build_llm(cfg: dict):
+    """返回 (模型, 要写进 config.yaml 的服务端信息)。"""
     if cfg["type"] == "search_then_title":
-        return SearchThenTitleLLM()
+        return SearchThenTitleLLM(), {"type": "rule"}
+    if cfg["type"] == "vllm":
+        llm = VLLMClient(cfg["base_url"], cfg["model"], timeout_s=cfg.get("timeout_s", 60.0), **cfg["sampling"])
+        # 先问服务端实际加载了哪个模型：配置里的名字只是别名，root 才是模型目录
+        info = llm.server_info()
+        if cfg.get("server_python"):
+            info["server_env"] = _package_versions(cfg["server_python"], ("vllm", "torch", "transformers"))
+        info["warmup_ms"] = round(llm.warmup(), 1)
+        return llm, info
     raise ValueError(f"unknown llm type: {cfg['type']}")
 
 
@@ -61,6 +80,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--allow-dirty", action="store_true", help="调试用：允许在有未提交改动时运行，结果目录带 -dirty 后缀")
+    ap.add_argument("--limit", type=int, help="调试用：只跑前 N 题（写进 config.yaml 的 argv，结果不能当正式结论）")
     args = ap.parse_args()
     cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
 
@@ -80,11 +100,12 @@ def main() -> None:
                                             encoding="utf-8")
 
     budget = Budget(**cfg["budget"])
-    llm = RetryingLLM(build_llm(cfg["llm"]), **cfg["llm"].get("retry", {}))
+    base_llm, llm_info = build_llm(cfg["llm"])
+    llm = RetryingLLM(base_llm, **cfg["llm"].get("retry", {}))
     tool, retrieval_info = build_tool(cfg["retrieval"])
     data_dir = ROOT / cfg["data"]["dir"]
     split = cfg["data"]["split"]
-    questions = read_jsonl(data_dir / "questions" / f"{split}.jsonl")
+    questions = read_jsonl(data_dir / "questions" / f"{split}.jsonl")[:args.limit]
     manifest_path = data_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
 
@@ -93,13 +114,23 @@ def main() -> None:
     cfg["run"] = {
         "run_id": run_id, "started_at": datetime.now().isoformat(timespec="seconds"),
         "git_commit": commit, "dirty": dirty, "argv": sys.argv,
-        "data_manifest": manifest, "retrieval": retrieval_info,
+        "data_manifest": manifest, "retrieval": retrieval_info, "llm_server": llm_info,
+        "system_prompt": SYSTEM_PROMPT,  # 模型看到的原文；改提示词不用翻 git 就能对比两次运行
         "env": {"python": platform.python_version(), "platform": platform.platform(),
-                **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml", "bm25s")}},
+                **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml", "bm25s", "openai", "transformers")}},
     }
     (out / "config.yaml").write_text(yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    trajectories = [run_episode(q["qid"], q["question"], llm, tool, budget) for q in questions]
+    trajectories, consecutive_errors = [], 0
+    for i, q in enumerate(questions, 1):
+        traj = run_episode(q["qid"], q["question"], llm, tool, budget)
+        trajectories.append(traj)
+        consecutive_errors = consecutive_errors + 1 if traj.stop_reason == StopReason.ERROR else 0
+        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+            sys.exit(f"连续 {consecutive_errors} 题模型服务失败（最近一次：{traj.error}），中止运行。"
+                     f"已跑 {i}/{len(questions)} 题，输出目录 {out} 不完整，不要用。")
+        if i % 20 == 0:
+            print(f"[{i}/{len(questions)}]", flush=True)
 
     # ---- 以下是评测：这时才读答案文件 ----
     labels = {l["qid"]: l for l in read_jsonl(data_dir / "labels" / f"{split}.jsonl")}
@@ -131,6 +162,7 @@ def main() -> None:
 
     metrics = aggregate(records)
     metrics["valid"] = metrics["failure_rate"] <= MAX_FAILURE_RATE
+    metrics["llm_retries"] = llm.num_retries
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # errors.csv：没答对的题都进来，按类别分开，方便 badcase 分析

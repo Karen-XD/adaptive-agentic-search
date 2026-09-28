@@ -4,12 +4,12 @@
 
 ## 当前位置
 
-**Day 3 进行中（2026-09-28）。vLLM 服务已起、原始输出已看过：提示词改用 Qwen 原生工具说明后格式有效率 0/8 → 8/8，需要在 `</tool_call>` 处截断。**
+**Day 3 进行中（2026-09-28）。3.3 完成：真模型（vLLM）接进实验入口，端到端跑通，每轮记 token / 延迟 / 截断原因；原生工具提示词进代码。**
 
-**下一步：3.3** —— 写真模型客户端（OpenAI 兼容接口，记录 token 数和延迟、预热、停止词），把原生工具提示词落进 `agent/prompts.py`，`config.yaml` 补模型名、解码参数、版本号 → 3.4 跑 B0 Direct / B1 Static RAG。
+**下一步：3.4** —— 先定 Direct 基线怎么配（见待办），再跑 B0 Direct / B1 Static RAG；`qa_metrics` 补 Token-F1、每题输入输出 token、P50/P95 延迟。
 
 > 2026-09-28 关机前：3.3 还没开始写代码，工作区已提交并 push。重启后按下面清单起**两个**服务（检索 + vLLM），再从 3.3 开始。
-> 留给用户的思考题（下次先听回答）：原问题 "Which writer was born earliest, Mary Gordon or H. L. Mencken?" 被模型改写成 "Mary Gordon birth year" 去搜——按 BM25 打分，这个改写让检索变好还是变差？对"让 Agent 自己写查询"有什么启示？（参考：改写引入了 `birth`，而正确段落写的是 `born`，BM25 下两者不匹配；"Nativity of Mary" 因为 Mary + Birth 反而排第 1。但改写也拆成了单实体查询，去掉了另一个实体的干扰。B1 用原问题搜，可以直接对比。）
+> 2026-09-28 恢复后：讲了 BM25（新增 "Who founded Apple" 词干化误合并的例子），用户回答了查询改写思考题，点评和实测排名见 LEARNING_NOTES「3.2 思考题」。结论：拆分方向对，但 `birth year` 式改写让两个实体的金标排名都变差，"实体名 + 类型词"才变好。
 
 ### 🔌 服务器重启后的恢复清单（2026-09-27 关机前写）
 
@@ -38,7 +38,7 @@ tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda act
 curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 53 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 72 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
@@ -55,7 +55,14 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - 比较题里模型一轮写了 3 个调用，还没看到结果就作答（答错）→ 需要在 `</tool_call>` 截断
   - 模型每轮都自己结束，不会续写假的检索结果（和 Search-R1 用的 base 模型不同）
   - 复现脚本：`python -m experiments.day3_prompt_format_probe`（自包含，保留了占位提示词原文；复跑结果一致）
-- [ ] 3.3 真模型客户端 + 原生工具提示词 + 运行配置补全
+- [x] 3.3 真模型客户端 + 原生工具提示词 + 运行配置补全（2026-09-28）
+  - `agent/llm.py`：`VLLMClient`（chat 接口、停止词、预热、错误分类：超时 / 连不上 / 5xx 可重试，4xx 不重试）；`generate` 改为返回 `Generation`（文字 + token 数 + 结束原因）
+  - `agent/native_tools.py`：用代码生成原生工具说明；`tests/test_prompt_native.py` 用模型目录里的对话模板逐字比对
+  - `Step` 新增 `prompt_tokens` / `completion_tokens` / `finish_reason` / `unclosed_tool_call`
+  - runner：`type: vllm`、`--limit N`、连续 5 题模型服务失败就中止、`config.yaml` 记模型目录 / 服务端 vllm·torch·transformers 版本 / 系统提示词原文 / 预热耗时、`metrics` 记重试次数
+  - `configs/qwen3b_agent_debug.yaml`；测试 53 → 72
+  - debug 前 8 题（调试运行）：第一轮格式 8/8，但看到检索结果后 5/20 轮格式错，其中 4 个是 JSON 完整、漏了 `</tool_call>`（关停止词重放也一样，是模型自己输出了结束符）→ 解析器放宽这一种情况后格式错误率 18% → 4%，没作答 2 → 0
+  - 贪心解码对输入极敏感：同一道题去掉数据里原有的末尾空格，第一轮查询就从 "Mary Gordon birth year" 变成两人合并的 "Mary Gordon birth year H. L. Mencken birth year" → Day 6 多 seed 看波动时要记住，单题结论不可靠
 - [ ] 3.4 B0 Direct / B1 Static RAG；补 Token-F1、输入输出 token 数、P50/P95 延迟
 - [ ] 3.5 人工看约 30 条轨迹，再批量跑 validation
 
@@ -141,6 +148,13 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-09-28 | 系统提示词 = 任务说明 + Qwen 原生工具说明（`# Tools` / `<tools>` 函数签名 / `<tool_call>` 格式，和对话模板传 `tools` 时逐字一致）；文本放在我们的代码里，不靠服务端的 `tools` 参数生成 | 占位提示词 0/8 → 原生写法 8/8；提示词进 git、进轨迹，不随 vLLM 版本变 |
 | 2026-09-28 | 生成时 `stop=["</tool_call>"]`，保留停止词本身 | 原生模板允许并行调用，提示词说"每轮一个"压不住；模型会在看到结果前就写 final_answer，这段文字留在上下文里会误导后续轮次。规则靠代码强制（同 Search-R1 在 `</search>` 截断） |
 | 2026-09-28 | 每次运行正式计时前先发一个预热请求 | 首个请求 6s（CUDA graph 等初始化），不预热会拉高 P95 延迟 |
+| 2026-09-28 | 原生工具说明在客户端用代码生成，不在请求里传 `tools` 让服务端套模板；测试里拿对话模板逐字比对 | 模型看到的每个字都在代码里、进 git 和 `config.yaml`；Direct 可以复用同一写法只给作答工具；换模型时测试会报不一致 |
+| 2026-09-28 | 解析器唯一的放宽：缺 `</tool_call>`，但最后一个 `<tool_call>` 之后直到结尾恰好是完整 JSON 对象 → 照常解析，`Step.unclosed_tool_call=True`；后面还有文字、JSON 不完整（截断）都仍然报错 | 实测格式错误多数是这种，意图无歧义；判成"没作答"会把格式失误记成停止失败。放宽范围窄、有标记、所有方法共用，不影响"纯文字不当答案"的原则 |
+| 2026-09-28 | 模型客户端关掉 openai 库自带的重试（`max_retries=0`），值为 None 的参数不发 | 库自带 2 次重试会和 `RetryingLLM` 叠加，重试次数说不清；库会把 None 发成 null（测试抓到的） |
+| 2026-09-28 | 服务端软件版本用 `verl_env` 的解释器读包元数据，不用 vLLM 的 `/version` | vLLM 0.6.3 缺版本文件，`/version` 只返回 "dev" |
+| 2026-09-28 | 假模型的 token 数记 None，不记 0 | 0 会被统计成"零成本" |
+| 2026-09-28 | 观察的 token 数不单独用 tokenizer 算，离线用相邻两轮的 `prompt_tokens` 差减去上一轮 `completion_tokens` 得到（含模板包装的几个 token） | 服务端的 `usage` 就是真实计费口径；少一个 tokenizer 依赖，也不会和服务端的计数方式不一致 |
+| 2026-09-28 | 连续 5 题模型服务失败就中止整次运行，输出目录标为不完整 | 服务挂了时继续跑只会把剩下的题全记成 error，浪费时间且结果无效 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -153,9 +167,12 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 ## 待办 / 开放问题
 
 - ~~观察结果用 `role="tool"` 拼回，要核对 Qwen2.5 对话模板的实际渲染~~ → 2026-09-28 已核对：包进 `<tool_response>`，方式正确。
+- 3.5 看轨迹时专门看查询改写：每个 Agent 查询的金标排名 vs 原问题的金标排名，统计改写是得是失（例：`Mary Gordon birth year` 让金标 1 → 2，`H. L. Mencken birth year` 让 5 → 10）。
 - 用了停止词后 `num_tool_calls` 永远 ≤ 1，"模型想并行调用"的信息丢了。需要时可在 debug 集上不设停止词单独统计。
-- 服务整体挂掉时（连续失败 N 次）应提前中止整个实验，Day 3 接真服务时加。
-- Day 3 接真模型时：`config.yaml` 补模型名、解码参数（temperature、max_tokens）、torch / vllm / transformers 版本；真实客户端的超时、断连异常要映射到 `RetryingLLM` 的可重试类型。
+- ~~服务整体挂掉时应提前中止~~ → 3.3 已加（连续 5 题）。
+- ~~`config.yaml` 补模型名、解码参数、版本；真实客户端异常映射到可重试类型~~ → 3.3 已完成。
+- 3.5 / validation 上再看：格式错误反馈里先举例 search，模型已经知道答案时也会被带去重搜（`5ae3fd6d` 第 3→4 轮）。改提示词只在 validation 上做。
+- 答案常写成句子或带多余修饰（"Atlanta" vs "Atlanta, Georgia"、答比较题时写年份），EM 偏严 → 3.4 补 Token-F1。
 - Direct 基线怎么配：`max_search_calls=0` 时提示词仍说可以搜，模型想搜会浪费一轮并被记成 forced_answer。Day 3 决定是用 `max_turns=1`，还是给 Direct 单独一份不带工具的提示词。
-- 轨迹还没记录观察的 token 数（plan 要求），需要真 tokenizer，Day 3 补。
+- ~~轨迹还没记录观察的 token 数~~ → 每轮记了服务端的 `prompt_tokens`，观察 token 由相邻两轮差值得到（见决策记录）。
 - `/root/Search-R1`（`verl_env` 可编辑安装）与子模块 `third_party/Search-R1` 的关系，到 V3 再决定。

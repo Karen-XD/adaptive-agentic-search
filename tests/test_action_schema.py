@@ -38,6 +38,32 @@ def test_invalid_actions(text, code):
     assert "<tool_call>" in r.error.message  # 报错里附正确写法，模型下一轮才知道怎么改
 
 
+@pytest.mark.parametrize("text", [
+    # 3.3 真模型实测：先写推理文字，JSON 写完就结束，漏了结尾标签
+    'The answer is X.\n<tool_call>\n{"name": "final_answer", "arguments": {"answer": "X"}}',
+    '<tool_call>{"name": "final_answer", "arguments": {"answer": "X"}}\n',
+])
+def test_unclosed_but_complete_tool_call_is_accepted(text):
+    r = parse_action(text)
+    assert r.action.name == "final_answer" and r.action.arguments.answer == "X"
+    assert r.unclosed and r.num_tool_calls == 1
+
+
+@pytest.mark.parametrize("text, code", [
+    ('<tool_call>{"name": "final_answer", "arguments": {"answer": "X"}} I think', ErrorCode.NO_ACTION),  # 后面还有文字
+    ('<tool_call>{"name": "final_answer", "arguments": {"answer": "X"', ErrorCode.NO_ACTION),       # 截断
+    ('<tool_call>{"name": "browse", "arguments": {}}', ErrorCode.UNKNOWN_TOOL),  # 补上标签后照常走结构层校验
+])
+def test_unclosed_repair_is_narrow(text, code):
+    r = parse_action(text)
+    assert r.action is None and r.error.error_code == code
+
+
+def test_closed_call_wins_over_unclosed_tail():
+    r = parse_action(call("search", query="a") + '<tool_call>{"name": "final_answer", "arguments": {"answer": "b"}}')
+    assert r.action.arguments.query == "a" and not r.unclosed
+
+
 def test_only_first_of_multiple_tool_calls_is_used():
     r = parse_action(call("search", query="a") + call("search", query="b"))
     assert r.action.arguments.query == "a" and r.num_tool_calls == 2
