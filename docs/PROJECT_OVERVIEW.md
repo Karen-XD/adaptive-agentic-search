@@ -98,10 +98,11 @@ outputs/runs/<run_id>/：配置、代码版本、指标、每道题的完整轨�
 | 3.1 模型服务 | 用 vLLM 把 Qwen2.5-3B 部署成 OpenAI 兼容接口（和检索服务一样是独立进程） | 模型只加载一次、多实验共用；以后换模型或多卡只改服务端 | 单次调用 130～440ms，首个请求要预热 |
 | 3.2 看原始输出 | 8 道调试题，看模型怎么写动作 | 不训练的模型会不会按我们的格式说话，是后面所有实验的前提 | **格式有效率：自己写的工具说明 0/8，换成 Qwen 微调时见过的原生工具说明 8/8**，说明不训练时要顺着模型的训练格式来；模型会一轮写多个调用、没看到结果就先作答，所以生成到 `</tool_call>` 就截断，用代码强制"每轮一个动作" |
 | 3.3 真模型接入 | 模型客户端（每轮记输入输出 token、延迟、截断原因）、原生提示词进代码、运行配置记下模型目录和服务端软件版本 | 基线和后面所有实验都通过它调模型；成本从这里开始按轮记录，这是"用多少算力换多少准确率"的另一半 | 端到端跑通。**第一轮格式全对，出错全在看到检索结果之后**：模型先写一段推理，再写调用时常漏掉结尾标签。解析器只放宽这一种没有歧义的情况，格式错误率 18% → 4%。另外：输入 token 随轮数累加（第 1 轮约 300，第 5 轮约 2000），**多轮的主要成本是反复读上下文，不是生成** |
+| 3.4 基线 | 四种方法共用一个入口：B0 Direct（不搜）、B1 Static RAG（原问题搜一次）、Agent（自己搜）、Oracle（直接给金标段落，诊断上限，不是方法） | 基线是所有改进的参照；Oracle 把"答错"拆成检索损失和阅读损失，告诉我们算力该加在哪 | debug 50 题（不出结论）：EM 0.16 → 0.24 → 0.28 → 0.52（Oracle）。**桥接题**：Agent 0.22、Oracle 0.53，瓶颈在检索；**比较题**：Static RAG 0.50 已经等于 Oracle，Agent 反而掉到 0.43，瓶颈在阅读和答案规范。Agent 的输入 token 是 Static RAG 的 4 倍、P50 延迟 6 倍。→ **不同题型该花的算力不一样**，这正是自适应的依据 |
 
 ### 接下来
 
-- **Day 3 剩余**：跑 B0 Direct（不搜）和 B1 Static RAG（固定搜一次）两个基线；补 Token-F1、token 数、P50/P95 延迟统计。
+- **Day 3 剩余**：人工看约 30 条轨迹，在 validation（200 题）上跑四种方法，出第一张正式基线表。
 - **Day 4～7**：Vanilla Agent 基线，第一张对比表，错题分析。
 
 ## 6. 现在怎么运行
@@ -110,7 +111,7 @@ outputs/runs/<run_id>/：配置、代码版本、指标、每道题的完整轨�
 conda activate dsr1
 cd /root/adaptive-agentic-search
 
-pytest tests/                                                # 72 个测试
+pytest tests/                                                # 95 个测试
 
 # 一次性准备（数据和索引不进 git，实例释放后要重建）
 python -m data_prep.prepare_hotpot                           # 语料池 + 题目划分 + 数据清单
@@ -125,8 +126,11 @@ python -m vllm.entrypoints.openai.api_server --model /root/autodl-tmp/hf_models/
 python -m experiments.day3_prompt_format_probe               # Day 3.2 提示词格式对比（0/8 vs 8/8）
 
 # 跑实验（要求代码已提交；--limit N 只跑前 N 题，调试用）
-python -m evaluation.run_eval --config configs/bm25_debug.yaml          # 规则假模型 + 真检索
-python -m evaluation.run_eval --config configs/qwen3b_agent_debug.yaml  # 真模型 + 真检索（要先起两个服务）
+python -m evaluation.run_eval --config configs/bm25_debug.yaml               # 规则假模型 + 真检索
+python -m evaluation.run_eval --config configs/qwen3b_direct_debug.yaml      # B0 Direct（要先起 vLLM）
+python -m evaluation.run_eval --config configs/qwen3b_static_rag_debug.yaml  # B1 Static RAG（还要起检索服务）
+python -m evaluation.run_eval --config configs/qwen3b_agent_debug.yaml       # Agent
+python -m evaluation.run_eval --config configs/qwen3b_oracle_debug.yaml      # Oracle 诊断上限（只许 validation / debug）
 ```
 
 一次运行会在 `outputs/runs/<时间>-<名字>/` 下生成：
@@ -135,7 +139,7 @@ python -m evaluation.run_eval --config configs/qwen3b_agent_debug.yaml  # 真模
 |---|---|---|
 | `config.yaml` | 完整配置 + 运行环境（含模型目录、服务端 vllm/torch 版本、系统提示词原文） | 复现 |
 | `git_commit.txt` | 代码版本 | 复现 |
-| `metrics.json` | 准确率、证据召回、失败率、平均搜索次数、格式错误率、停止原因分布 | 出实验表 |
+| `metrics.json` | EM、F1、证据召回、失败率、平均搜索次数、输入输出 token、P50/P95 延迟、格式错误率、停止原因分布 | 出实验表 |
 | `trajectories.jsonl` | 每道题每一轮的原始输出、动作、检索结果、token 数、耗时、预算用量 | 错题分析、重放 |
 | `errors.csv` | 没答对的题，按"答错 / 没作答 / 模型服务出错"分类 | 错题分析的入口 |
 
@@ -143,13 +147,13 @@ python -m evaluation.run_eval --config configs/qwen3b_agent_debug.yaml  # 真模
 
 | 目录 | 放什么 | 现状 |
 |---|---|---|
-| `agent/` | 数据结构、解析器、循环、提示词、模型接口 | Day 1 完成；Day 3 接入 vLLM 客户端和原生工具提示词 |
+| `agent/` | 数据结构、解析器、循环、提示词、模型接口、四种方法（`methods.py`） | Day 1 完成；Day 3 接入 vLLM 客户端、原生工具提示词、基线方法 |
 | `retrieval/` | 检索工具：假检索、BM25、检索服务和客户端 | Day 2 完成；V2 加向量检索、混合检索、重排 |
-| `evaluation/` | 评测指标（准确率、证据召回）、实验入口 | Day 2 完成 |
-| `configs/` | 实验配置 | `mock_v1.yaml`、`bm25_debug.yaml`、`qwen3b_agent_debug.yaml` |
+| `evaluation/` | 评测指标（EM、F1、证据召回、成本）、实验入口、Oracle 金标读取 | Day 3 补齐基线所需指标 |
+| `configs/` | 实验配置 | `qwen3b_debug_base.yaml` + 四个继承它的方法配置；`mock_v1.yaml`、`bm25_debug.yaml` |
 | `data_prep/` | 数据准备、数据体检 | HotpotQA 完成 |
 | `data/`、`indexes/` | 数据和索引（不进 git） | HotpotQA 语料池 + BM25 索引 |
-| `tests/` | 自动测试 | 72 个 |
+| `tests/` | 自动测试 | 95 个 |
 | `third_party/Search-R1/` | 上游源码，只读参考 | 锁定在 `598e61b` |
 
 ## 8. 面试一分钟版（随进度更新）

@@ -4,9 +4,9 @@
 
 ## 当前位置
 
-**Day 3 进行中（2026-09-28）。3.3 完成：真模型（vLLM）接进实验入口，端到端跑通，每轮记 token / 延迟 / 截断原因；原生工具提示词进代码。**
+**Day 3 进行中（2026-09-28）。3.4 完成：四种方法（Direct / Static RAG / Agent / Oracle 诊断）共用一个入口，debug 集上各跑一次，出了第一张对比表。**
 
-**下一步：3.4** —— 先定 Direct 基线怎么配（见待办），再跑 B0 Direct / B1 Static RAG；`qa_metrics` 补 Token-F1、每题输入输出 token、P50/P95 延迟。
+**下一步：3.5** —— 人工看约 30 条轨迹（重点：比较题 Agent 为什么不如 Static RAG、查询改写得失），修格式报错提示，然后在 validation（200 题）上批量跑四种方法，出第一张正式基线表。
 
 > 2026-09-28 关机前：3.3 还没开始写代码，工作区已提交并 push。重启后按下面清单起**两个**服务（检索 + vLLM），再从 3.3 开始。
 > 2026-09-28 恢复后：讲了 BM25（新增 "Who founded Apple" 词干化误合并的例子），用户回答了查询改写思考题，点评和实测排名见 LEARNING_NOTES「3.2 思考题」。结论：拆分方向对，但 `birth year` 式改写让两个实体的金标排名都变差，"实体名 + 类型词"才变好。
@@ -38,7 +38,7 @@ tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda act
 curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 72 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 95 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
@@ -64,7 +64,23 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - debug 前 8 题（调试运行）：第一轮格式 8/8，但看到检索结果后 5/20 轮格式错，其中 4 个是 JSON 完整、漏了 `</tool_call>`（关停止词重放也一样，是模型自己输出了结束符）→ 解析器放宽这一种情况后格式错误率 18% → 4%，没作答 2 → 0
   - **正式运行 `20260928-212118-qwen3b-agent-debug`**（commit `bed5236`，debug 全 50 题，96s）：EM 0.28（宽松包含匹配 0.44）、证据召回 0.66、金标全部找齐 0.42、格式错误率 4.9%（补上结尾标签 8 次）、平均实际搜索 1.86 次；停止原因 answered 40 / forced 9 / no_answer 1；每题输入 token 中位数 2031、输出 162；每题端到端 P50 1.6s、P95 3.7s。**证据找齐的 21 题里仍答错 10 题** → 瓶颈不只在检索。debug 集只用于调试，数字不进结论
   - 贪心解码对输入极敏感：同一道题去掉数据里原有的末尾空格，第一轮查询就从 "Mary Gordon birth year" 变成两人合并的 "Mary Gordon birth year H. L. Mencken birth year" → Day 6 多 seed 看波动时要记住，单题结论不可靠
-- [ ] 3.4 B0 Direct / B1 Static RAG；补 Token-F1、输入输出 token 数、P50/P95 延迟
+- [x] 3.4 B0 Direct / B1 Static RAG / Oracle 诊断；补 Token-F1、输入输出 token 数、P50/P95 延迟（2026-09-28）
+  - `agent/methods.py`：四种方法共用循环、解析器、Budget；只能作答的三种方法提示词一字不差，只差证据
+  - `evaluation/oracle.py`：评测侧读金标段落，拒绝 test；`CLAUDE.md` 记下这个例外（用户同意）
+  - 配置改成 `qwen3b_debug_base.yaml` + 四个 `extends` 它的方法配置，解码参数、数据、预算只写一处
+  - 测试 72 → 95，三处改坏检查都能抓到（Static RAG 不计成本、Oracle 不排序/放行 test、Direct 用错提示词）
+  - 正式运行（commit `cc0b7c1`，debug 50 题，只用于调试，不出结论）：
+
+    | 方法 | EM | F1 | 证据召回 | 全找齐 | 搜索次数 | 输入 token | 输出 token | P50 / P95 延迟 |
+    |---|---|---|---|---|---|---|---|---|
+    | B0 Direct `220911` | 0.16 | 0.24 | 0 | 0 | 0 | 221 | 21 | 0.21s / 0.25s |
+    | B1 Static RAG `220924` | 0.24 | 0.32 | 0.61 | 0.30 | 1 | 605 | 26 | 0.26s / 0.56s |
+    | Agent `220956` | 0.28 | 0.36 | 0.66 | 0.42 | 1.86 | 2482 | 190 | 1.67s / 3.64s |
+    | Oracle（诊断上限）`220941` | 0.52 | 0.70 | 1 | 1 | 0 | 442 | 22 | 0.21s / 0.27s |
+
+  - 按题型：桥接题（36 题）EM Direct 0.06 → RAG 0.14 → Agent 0.22 → Oracle 0.53；比较题（14 题）Direct 0.43 → RAG 0.50 → **Agent 0.43** → Oracle 0.50
+  - Agent vs Static RAG 逐题：Agent 对、RAG 错 7 题；RAG 对、Agent 错 5 题 → 50 题上差距在噪声范围内
+  - Agent 与 3.3 的运行逐轮输出 50/50 完全一致 → 本次重构没有改变 Agent 行为
 - [ ] 3.5 人工看约 30 条轨迹，再批量跑 validation
 
 ## Day 2 子步骤
@@ -156,6 +172,13 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-09-28 | 假模型的 token 数记 None，不记 0 | 0 会被统计成"零成本" |
 | 2026-09-28 | 观察的 token 数不单独用 tokenizer 算，离线用相邻两轮的 `prompt_tokens` 差减去上一轮 `completion_tokens` 得到（含模板包装的几个 token） | 服务端的 `usage` 就是真实计费口径；少一个 tokenizer 依赖，也不会和服务端的计数方式不一致 |
 | 2026-09-28 | 连续 5 题模型服务失败就中止整次运行，输出目录标为不完整 | 服务挂了时继续跑只会把剩下的题全记成 error，浪费时间且结果无效 |
+| 2026-09-28 | Direct / Static RAG / Oracle 共用一份"只能作答"的提示词（原生写法，只给 final_answer 工具），走同一个循环和解析器；证据放在用户消息里问题前面 | 三者只差"证据"一个变量；Direct 若沿用 Agent 提示词，模型想搜会浪费轮数并被记成 forced_answer |
+| 2026-09-28 | Static RAG 的那次检索计入 `search_calls_used`（=1），`max_search_calls` 配成 1；Oracle 不计检索成本 | 成本和 Agent 放在同一把尺子上；配置和方法对不上时 `check_budget` 拒绝运行 |
+| 2026-09-28 | 只能作答的方法也用 `max_turns=5` | 多出来的轮次只在格式出错时用来重试，和 Agent 的纠错机会一致 |
+| 2026-09-28 | Oracle 段落按 doc_id 排序，不按标注顺序 | 标注顺序常是第一跳在前，会把推理路径透露给模型 |
+| 2026-09-28 | Token-F1 照搬 HotpotQA 官方脚本（yes/no/noanswer 只认完全一致，不做词干化） | 和论文可比；"Latvia" vs "Latvian" 仍记 0 分是官方口径 |
+| 2026-09-28 | 证据召回把答题前给的证据也算进去 | Static RAG 的证据来自流程检索，不算就会是 0，和 Agent 不可比 |
+| 2026-09-28 | 配置支持 `extends` 继承；基础配置没有 `name`，不能直接运行 | 对比实验的解码参数、数据、预算必须完全一致，靠继承保证，不靠人抄对 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -172,7 +195,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - 用了停止词后 `num_tool_calls` 永远 ≤ 1，"模型想并行调用"的信息丢了。需要时可在 debug 集上不设停止词单独统计。
 - ~~服务整体挂掉时应提前中止~~ → 3.3 已加（连续 5 题）。
 - ~~`config.yaml` 补模型名、解码参数、版本；真实客户端异常映射到可重试类型~~ → 3.3 已完成。
-- 3.5 / validation 上再看：格式错误反馈里先举例 search，模型已经知道答案时也会被带去重搜（`5ae3fd6d` 第 3→4 轮）。改提示词只在 validation 上做。
+- 3.5 修：格式报错提示（`agent/parser.py` 的 `_FORMAT_HINT`）固定举例 search，但只能作答的方法没有 search 工具；Agent 里模型已经知道答案时也会被它带去重搜（`5ae3fd6d` 第 3→4 轮）。提示应按当前可用工具生成。Static RAG 唯一的格式错误题（`5abc3fe7`）第 2～5 轮一直写 `Call final_answer {...}` 不带标签。
+- 3.5 看：比较题 Agent（0.43）不如 Static RAG（0.50）。原问题同时含两个实体，一次检索就能覆盖；Agent 的改写可能反而变差（同 Mary Gordon 的例子）→ 这是"按题型自适应"的直接证据，validation 上确认。
+- 3.5 / validation 上调答案规范：Oracle 下比较题仍错的 7 题里，多数是答案形式问题（问"谁"却答了年份、答 "true" 而不是 "yes"、把标题 "Firehose (band)" 原样抄下来），真正推理错约 2～3 题。可以在提示词里加答案格式说明，只在 validation 上调。
 - 错因拆分（`20260928-212118`，debug 50 题）：答错 36 题中 26 题证据没找齐、10 题证据齐了仍答错；这 10 题约 5 题是 EM 口径（意思对）、1 题标签问题、约 4 题真读错 → 当前瓶颈主要在检索。
 - 候选诊断：**Oracle context**（直接给金标段落，衡量纯阅读能力上限）。它要把 labels 里的金标段落放进 prompt，和"标签只给评测器"的防泄漏规则冲突 → 只能作为明确标注的诊断上限、只在 validation/debug 上跑、不作为方法参与比较；**实现前先和用户确认这个例外**。
 - 候选消融：模型尺寸（Qwen2.5-3B vs 7B，7B bf16 权重约 15GB，4090 能放下；14B 需要量化）。放在 Oracle 设定下比较才能测纯阅读能力；建议 Day 5～6 基线表定下来后再做。
