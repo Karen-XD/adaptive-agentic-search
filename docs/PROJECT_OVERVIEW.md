@@ -91,9 +91,16 @@ outputs/runs/<run_id>/：配置、代码版本、指标、每道题的完整轨�
 | 2.3 检索服务 | 把检索器包成独立的 HTTP 服务 | 索引只加载一次、多实验共用；以后换检索方法不影响 Agent；记录真实接口耗时 | 单次检索约 10ms，不是瓶颈 |
 | 2.4 端到端 | 假模型 + 真检索 + 调试集跑一次 | 验证新零件接进骨架后整条流程没问题 | 跑通；新增"证据召回"指标，把"搜得好不好"和"答得好不好"分开 |
 
+### Day 3：接入真模型（进行中）
+
+| 步骤 | 做了什么 | 为什么 | 结论 |
+|---|---|---|---|
+| 3.1 模型服务 | 用 vLLM 把 Qwen2.5-3B 部署成 OpenAI 兼容接口（和检索服务一样是独立进程） | 模型只加载一次、多实验共用；以后换模型或多卡只改服务端 | 单次调用 130～440ms，首个请求要预热 |
+| 3.2 看原始输出 | 8 道调试题，看模型怎么写动作 | 不训练的模型会不会按我们的格式说话，是后面所有实验的前提 | **格式有效率：自己写的工具说明 0/8，换成 Qwen 微调时见过的原生工具说明 8/8**，说明不训练时要顺着模型的训练格式来；模型会一轮写多个调用、没看到结果就先作答，所以生成到 `</tool_call>` 就截断，用代码强制"每轮一个动作" |
+
 ### 接下来
 
-- **Day 3**：接入真模型（Qwen2.5-3B），跑 Direct（不搜）和 Static RAG（固定搜一次）两个基线。
+- **Day 3 剩余**：真模型客户端（记录 token 数、延迟），跑 B0 Direct（不搜）和 B1 Static RAG（固定搜一次）两个基线。
 - **Day 4～7**：Vanilla Agent 基线，第一张对比表，错题分析。
 
 ## 6. 现在怎么运行
@@ -111,6 +118,10 @@ python -m retrieval.bm25 build --corpus data/hotpotqa/v1/corpus.jsonl --index in
 
 # 启动检索服务（放 tmux 里常驻）
 python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100
+
+# 启动模型服务（verl_env 环境，放 tmux 里常驻；完整参数见 docs/PROGRESS.md 恢复清单）
+python -m vllm.entrypoints.openai.api_server --model /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct --port 8000 ...
+python -m experiments.day3_prompt_format_probe               # Day 3.2 提示词格式对比（0/8 vs 8/8）
 
 # 跑实验（要求代码已提交）
 python -m evaluation.run_eval --config configs/bm25_debug.yaml

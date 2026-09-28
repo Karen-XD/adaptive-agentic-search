@@ -4,9 +4,12 @@
 
 ## 当前位置
 
-**Day 2 ✅ 已完成（2026-09-27）。Qwen2.5-3B-Instruct 已下载并校验（6.17GB，`/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct`，对话模板含 `tool_call`）。**
+**Day 3 进行中（2026-09-28）。vLLM 服务已起、原始输出已看过：提示词改用 Qwen 原生工具说明后格式有效率 0/8 → 8/8，需要在 `</tool_call>` 处截断。**
 
-**下一步：Day 3** —— 用 vLLM 起模型服务 → 先拿 5～10 道 debug 题看模型原始输出（重点看格式有效率、`role="tool"` 在 Qwen 模板里怎么渲染）→ 跑 Direct（不检索）和 Static RAG（固定搜一次）两个基线。
+**下一步：3.3** —— 写真模型客户端（OpenAI 兼容接口，记录 token 数和延迟、预热、停止词），把原生工具提示词落进 `agent/prompts.py`，`config.yaml` 补模型名、解码参数、版本号 → 3.4 跑 B0 Direct / B1 Static RAG。
+
+> 2026-09-28 关机前：3.3 还没开始写代码，工作区已提交并 push。重启后按下面清单起**两个**服务（检索 + vLLM），再从 3.3 开始。
+> 留给用户的思考题（下次先听回答）：原问题 "Which writer was born earliest, Mary Gordon or H. L. Mencken?" 被模型改写成 "Mary Gordon birth year" 去搜——按 BM25 打分，这个改写让检索变好还是变差？对"让 Agent 自己写查询"有什么启示？（参考：改写引入了 `birth`，而正确段落写的是 `born`，BM25 下两者不匹配；"Nativity of Mary" 因为 Mary + Birth 反而排第 1。但改写也拆成了单实体查询，去掉了另一个实体的干扰。B1 用原问题搜，可以直接对比。）
 
 ### 🔌 服务器重启后的恢复清单（2026-09-27 关机前写）
 
@@ -24,13 +27,37 @@ tmux new -d -s retriever "source /root/miniconda3/etc/profile.d/conda.sh && cond
   && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100"
 curl -s http://127.0.0.1:8100/health   # 应返回 num_docs: 507494
 
-# 3. 自检
+# 3. 重启 vLLM 模型服务（Day 3 起，约 50s 就绪，显存占约 19GB）
+#    --guided-decoding-backend 必须加：vLLM 0.6.3 默认后端 outlines 缺依赖，每个请求都会 500
+mkdir -p /root/autodl-tmp/logs
+tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda activate verl_env \
+  && python -m vllm.entrypoints.openai.api_server --model /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct \
+  --served-model-name qwen2.5-3b-instruct --host 127.0.0.1 --port 8000 --dtype bfloat16 --max-model-len 8192 \
+  --gpu-memory-utilization 0.85 --seed 0 --disable-log-requests --guided-decoding-backend lm-format-enforcer \
+  2>&1 | tee /root/autodl-tmp/logs/vllm.log"
+curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
+
+# 4. 自检
 cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 53 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 3 子步骤
+
+- [x] 3.1 vLLM 模型服务（`verl_env`，tmux `vllm`，端口 8000，OpenAI 兼容接口）。首个请求 6s 是预热，之后单次调用 130～440ms
+- [x] 3.2 看原始输出（debug 前 8 题，temperature=0，不设停止词）
+  - `role="tool"` 被模板渲染成 user 轮次 + `<tool_response>…</tool_response>`，连续多条合并进同一轮 → 现有拼回方式正确
+  - 占位提示词：格式有效率 **0/8**，模型写成 `Search: Search({"query": ...})`（模仿提示词里的列表写法），但查询意图合理
+  - 改用 Qwen 原生工具说明（`# Tools` + `<tools>` 函数签名，由对话模板生成）：**8/8**
+  - 比较题里模型一轮写了 3 个调用，还没看到结果就作答（答错）→ 需要在 `</tool_call>` 截断
+  - 模型每轮都自己结束，不会续写假的检索结果（和 Search-R1 用的 base 模型不同）
+  - 复现脚本：`python -m experiments.day3_prompt_format_probe`（自包含，保留了占位提示词原文；复跑结果一致）
+- [ ] 3.3 真模型客户端 + 原生工具提示词 + 运行配置补全
+- [ ] 3.4 B0 Direct / B1 Static RAG；补 Token-F1、输入输出 token 数、P50/P95 延迟
+- [ ] 3.5 人工看约 30 条轨迹，再批量跑 validation
 
 ## Day 2 子步骤
 
@@ -109,6 +136,11 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-09-27 | BM25 用 bm25s（默认 k1=1.5, b=0.75）+ 英文停用词 + 词干化；标题和正文一起建索引；同分按 doc_id 排序 | 标题就是实体名，是最强信号；词干化与 Pyserini 默认一致；同分排序保证结果可复现 |
 | 2026-09-27 | 检索做成独立服务，正式实验走 HTTP；客户端超时 5s，异常交给循环记 tool_error | 索引只加载一次、多实验共用；之后换向量检索不影响 Agent；记录真实接口耗时 |
 | 2026-09-27 | 新增证据召回指标：`evidence_recall`（平均覆盖金标比例）、`all_evidence_found`（金标全部找齐的比例） | 把"搜得好不好"和"答得好不好"分开，是 V2 比较路由策略的核心指标 |
+| 2026-09-28 | vLLM 启动加 `--guided-decoding-backend lm-format-enforcer`，不往 `verl_env` 装 `pyairports` | vLLM 0.6.3 对每个 chat 请求都构造（空的）约束解码参数，默认后端 outlines 导入时缺 `pyairports` → 全部 500；lm-format-enforcer 已装好，遇到空参数直接返回"不约束"，行为和不约束一致 |
+| 2026-09-28 | 模型服务走 chat 接口（服务端套对话模板），不在客户端自己拼模板 | 模板以模型目录里的 `tokenizer_config.json` 为准，只有一份；`usage` 直接给出输入输出 token 数 |
+| 2026-09-28 | 系统提示词 = 任务说明 + Qwen 原生工具说明（`# Tools` / `<tools>` 函数签名 / `<tool_call>` 格式，和对话模板传 `tools` 时逐字一致）；文本放在我们的代码里，不靠服务端的 `tools` 参数生成 | 占位提示词 0/8 → 原生写法 8/8；提示词进 git、进轨迹，不随 vLLM 版本变 |
+| 2026-09-28 | 生成时 `stop=["</tool_call>"]`，保留停止词本身 | 原生模板允许并行调用，提示词说"每轮一个"压不住；模型会在看到结果前就写 final_answer，这段文字留在上下文里会误导后续轮次。规则靠代码强制（同 Search-R1 在 `</search>` 截断） |
+| 2026-09-28 | 每次运行正式计时前先发一个预热请求 | 首个请求 6s（CUDA graph 等初始化），不预热会拉高 P95 延迟 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -120,7 +152,8 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 
 ## 待办 / 开放问题
 
-- 观察结果用 `role="tool"` 拼回，Day 3 接真模型时要核对 Qwen2.5 对话模板的实际渲染（是否包进 `<tool_response>`）。
+- ~~观察结果用 `role="tool"` 拼回，要核对 Qwen2.5 对话模板的实际渲染~~ → 2026-09-28 已核对：包进 `<tool_response>`，方式正确。
+- 用了停止词后 `num_tool_calls` 永远 ≤ 1，"模型想并行调用"的信息丢了。需要时可在 debug 集上不设停止词单独统计。
 - 服务整体挂掉时（连续失败 N 次）应提前中止整个实验，Day 3 接真服务时加。
 - Day 3 接真模型时：`config.yaml` 补模型名、解码参数（temperature、max_tokens）、torch / vllm / transformers 版本；真实客户端的超时、断连异常要映射到 `RetryingLLM` 的可重试类型。
 - Direct 基线怎么配：`max_search_calls=0` 时提示词仍说可以搜，模型想搜会浪费一轮并被记成 forced_answer。Day 3 决定是用 `max_turns=1`，还是给 Direct 单独一份不带工具的提示词。
