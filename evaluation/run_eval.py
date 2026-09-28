@@ -22,7 +22,7 @@ from agent.llm import RetryingLLM, SearchThenTitleLLM, VLLMClient
 from agent.methods import NEEDS_RETRIEVAL, check_budget, run_method
 from agent.prompts import AGENT_PROMPTS, ANSWER_ONLY_PROMPTS
 from agent.schema import Budget, ErrorCode, StopReason
-from evaluation.oracle import load_gold_docs
+from evaluation.oracle import ALLOWED_SPLITS as ORACLE_SPLITS, load_gold_docs
 from evaluation.qa_metrics import aggregate, exact_match, f1_score
 from retrieval.bm25 import BM25SearchTool
 from retrieval.client import HttpSearchTool
@@ -110,6 +110,8 @@ def main() -> None:
         cfg["data"]["split"] = args.split
     if cfg["data"]["split"] == "test" and not args.final:
         sys.exit("test 集只在最后评测时跑一次；确认要跑请加 --final。调参请用 --split validation。")
+    if cfg.get("method") == "oracle" and cfg["data"]["split"] not in ORACLE_SPLITS:
+        sys.exit(f"Oracle 是读了标签的诊断，只许在 {ORACLE_SPLITS} 上跑")  # 建输出目录前就拦下
     method = cfg.setdefault("method", "agent")
     budget = Budget(**cfg["budget"])
     check_budget(method, budget)  # 在建输出目录之前就检查，配错了不留半成品
