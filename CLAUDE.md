@@ -36,3 +36,4 @@
 - `third_party/Search-R1` 子模块保持上游原样，本地修改放 `third_party/patches/`。
 - 每次实验输出到 `outputs/runs/<run_id>/`：`config.yaml`、`git_commit.txt`、`metrics.json`、`trajectories.jsonl`、`errors.csv`。
 - 防泄漏：gold answer / 测试集标签只由评测器读取，绝不进入 prompt 或检索工具；阈值和 prompt 只在 validation 上调。
+  - 唯一例外（用户 2026-09-28 同意）：Oracle context 诊断把金标段落放进 prompt，用来衡量纯阅读能力上限。只能在 validation / debug 上跑（代码拒绝 test），结果标注为诊断上限，不作为方法参与比较。

@@ -1,0 +1,5 @@
+# B1 Static RAG：拿原问题搜一次 top_k 条，放进提示词再作答。搜索次数固定为 1（流程替模型搜）。
+extends: qwen3b_debug_base.yaml
+name: qwen3b-static-rag-debug
+method: static_rag
+budget: {max_search_calls: 1}

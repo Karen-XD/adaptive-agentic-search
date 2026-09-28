@@ -11,8 +11,8 @@ from typing import Protocol
 
 from agent.llm import LLM
 from agent.parser import parse_action
-from agent.prompts import FORCED_ANSWER_NOTICE, SYSTEM_PROMPT, render_observation
-from agent.schema import (Budget, BudgetState, Doc, ErrorCode, FinalAnswerAction, Observation,
+from agent.prompts import AGENT_PROMPTS, Prompts, render_context, render_observation
+from agent.schema import (Budget, BudgetState, Context, Doc, ErrorCode, FinalAnswerAction, Observation,
                           SearchAction, Step, StopReason, Trajectory)
 
 
@@ -32,13 +32,25 @@ def _error(code: ErrorCode, message: str) -> Observation:
     return Observation(ok=False, error_code=code, message=message)
 
 
-def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Budget) -> Trajectory:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Question: {question}"}]
+def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budget: Budget, *,
+                prompts: Prompts = AGENT_PROMPTS, context: Context | None = None,
+                method: str = "agent") -> Trajectory:
+    """各方法怎么调用它见 agent/methods.py。"""
+    user = f"Question: {question}"
+    if context is not None:
+        user = f"{render_context(context.observation)}\n\n{user}"
+    messages = [{"role": "system", "content": prompts.system}, {"role": "user", "content": user}]
     state = BudgetState()
     steps: list[Step] = []
     searched: dict[str, int] = {}  # 归一化后的查询 → 第几轮搜的
     seen_doc_ids: set[str] = set()
+    if context is not None:
+        seen_doc_ids |= {d.doc_id for d in context.observation.docs}
+        if context.query is not None:
+            # Static RAG：流程替模型拿原问题搜了一次。成本照算，和 Agent 的搜索次数放在同一把尺子上
+            state.search_attempts += 1
+            state.search_calls_used += 1
+            searched[normalize_query(context.query)] = 0
     budget_hit = False  # 搜索次数用完后模型仍想搜：之后只许作答
     notified = False    # 是否已经告诉过模型"只许作答"
     answer, stop_reason, error = None, StopReason.NO_ANSWER, None
@@ -48,7 +60,7 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
         # 这样 forced_answer 统计的才是"还想搜但被截停"，而不是"本来就打算停"
         forced = budget_hit or state.turns_used == budget.max_turns - 1
         if forced and not notified:
-            messages.append({"role": "user", "content": FORCED_ANSWER_NOTICE})
+            messages.append({"role": "user", "content": prompts.forced_notice})
             notified = True
 
         t0 = time.perf_counter()
@@ -73,7 +85,7 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
             state.search_attempts += 1
             key = normalize_query(action.arguments.query)
             if forced or not state.can_search(budget):
-                obs = _error(ErrorCode.BUDGET_EXCEEDED, FORCED_ANSWER_NOTICE)
+                obs = _error(ErrorCode.BUDGET_EXCEEDED, prompts.forced_notice)
                 budget_hit = notified = True  # 报错信息里已经告诉过它了
             elif key in searched:
                 # 没有真正执行，不扣搜索次数；但这一轮生成已经花了，照样算轮数（max_turns 兜底防死循环）
@@ -108,5 +120,6 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool, budget: Bud
         # role="tool"：Qwen2.5 的对话模板把它渲染成 user 轮次 + <tool_response>…</tool_response>（3.2 已核对）
         messages.append({"role": "tool", "content": render_observation(obs)})
 
-    return Trajectory(qid=qid, question=question, budget=budget, steps=steps, budget_state=state,
+    return Trajectory(qid=qid, question=question, method=method, context=context, budget=budget,
+                      steps=steps, budget_state=state,
                       final_answer=answer, stop_reason=stop_reason, error=error)

@@ -1,33 +1,4 @@
-# Day 3.3 真模型接入：Qwen2.5-3B-Instruct（vLLM）+ BM25 检索服务 + HotpotQA 调试集。
-# 目的是验证"真模型 → 解析 → 检索 → 落盘"整条链路和成本记录，不是正式结果；调参只在 validation 上做。
-# 先起两个服务（docs/PROGRESS.md 恢复清单）：检索 8100、vLLM 8000。
+# Vanilla Agent：模型自己决定搜什么、搜几次（最多 3 次）。Day 4 的 B2 在它上面加固。
+extends: qwen3b_debug_base.yaml
 name: qwen3b-agent-debug
-seed: 42
-
-data:
-  dir: data/hotpotqa/v1
-  split: debug
-
-llm:
-  type: vllm
-  base_url: http://127.0.0.1:8000/v1
-  model: qwen2.5-3b-instruct       # vLLM 的 --served-model-name；实际模型目录由服务端返回，记在 run.llm_server.root
-  server_python: /root/miniconda3/envs/verl_env/bin/python  # 用来读服务端的 vllm / torch / transformers 版本
-  timeout_s: 60.0
-  sampling:
-    temperature: 0.0               # 贪心解码：基线先求确定可复现；解码波动放到 Day 6 用多个 seed 单独看
-    top_p: 1.0
-    max_tokens: 512                # 一轮只有一个工具调用，3.2 里最长的输出不到 150 token；512 留足余量，撞到上限记 finish_reason=length
-    seed: 0
-    stop: ["</tool_call>"]         # 一轮只执行一个动作，截掉模型抢先写的后续调用
-  retry: {max_retries: 3, base_delay_s: 1.0}
-
-retrieval:
-  type: http
-  url: http://127.0.0.1:8100
-  timeout_s: 5.0
-
-budget:
-  max_turns: 5
-  max_search_calls: 3
-  top_k: 3
+method: agent

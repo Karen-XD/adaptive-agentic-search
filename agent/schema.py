@@ -131,9 +131,19 @@ class Step(BaseModel):
     budget_state: BudgetState                # 本轮结束后的用量快照
 
 
+class Context(BaseModel):
+    """答题前就放进提示词的证据（Static RAG / Oracle），不是模型自己搜来的。"""
+    source: Literal["retrieval", "oracle"]
+    query: Optional[str] = None  # Static RAG 拿原问题检索；Oracle 没有查询，也不算检索成本
+    observation: Observation
+    latency_ms: float = 0.0
+
+
 class Trajectory(BaseModel):
     qid: str  # 只用于日志对齐；不会传给检索工具
     question: str
+    method: str = "agent"               # agent / direct / static_rag / oracle，见 agent/methods.py
+    context: Optional[Context] = None
     budget: Budget
     steps: list[Step]
     budget_state: BudgetState  # 最终用量；模型第一轮就失败时 steps 为空，统计成本靠它

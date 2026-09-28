@@ -1,0 +1,7 @@
+# Oracle context（诊断上限，不是方法）：直接给金标段落，衡量"证据完美时能答对多少"。
+# ⚠️ 防泄漏规则的唯一例外（CLAUDE.md）：只许在 validation / debug 上跑，代码拒绝 test。
+extends: qwen3b_debug_base.yaml
+name: qwen3b-oracle-debug
+method: oracle
+retrieval: null
+budget: {max_search_calls: 0}

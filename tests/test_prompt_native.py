@@ -8,7 +8,7 @@ import os
 import pytest
 
 from agent.native_tools import FINAL_ANSWER_TOOL, native_system_prompt
-from agent.prompts import SYSTEM_PROMPT, TASK, TOOLS
+from agent.prompts import ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_TASK, SYSTEM_PROMPT, TASK, TOOLS
 
 MODEL_DIR = os.environ.get("MODEL_DIR", "/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct")
 
@@ -23,10 +23,12 @@ def _from_chat_template(task: str, tools: list[dict]) -> str:
 
 
 @pytest.mark.skipif(not os.path.isdir(MODEL_DIR), reason="模型目录不存在，跳过逐字比对")
-@pytest.mark.parametrize("tools", [TOOLS, [FINAL_ANSWER_TOOL]], ids=["agent", "answer_only"])
-def test_matches_chat_template(tools):
-    # answer_only 给 3.4 的 Direct 基线用：同一种写法，只是少了 search 工具
-    assert native_system_prompt(TASK, tools) == _from_chat_template(TASK, tools)
+@pytest.mark.parametrize("prompt, task, tools", [
+    (SYSTEM_PROMPT, TASK, TOOLS),
+    (ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_TASK, [FINAL_ANSWER_TOOL]),  # B0 / B1 / Oracle：同一种写法，少了 search
+], ids=["agent", "answer_only"])
+def test_matches_chat_template(prompt, task, tools):
+    assert prompt == _from_chat_template(task, tools)
 
 
 def test_agent_prompt_is_what_the_loop_sends():

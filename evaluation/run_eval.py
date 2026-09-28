@@ -19,10 +19,11 @@ from pathlib import Path
 import yaml
 
 from agent.llm import RetryingLLM, SearchThenTitleLLM, VLLMClient
-from agent.loop import run_episode
-from agent.prompts import SYSTEM_PROMPT
+from agent.methods import NEEDS_RETRIEVAL, check_budget, run_method
+from agent.prompts import AGENT_PROMPTS, ANSWER_ONLY_PROMPTS
 from agent.schema import Budget, ErrorCode, StopReason
-from evaluation.qa_metrics import aggregate, exact_match
+from evaluation.oracle import load_gold_docs
+from evaluation.qa_metrics import aggregate, exact_match, f1_score
 from retrieval.bm25 import BM25SearchTool
 from retrieval.client import HttpSearchTool
 from retrieval.mock import MockSearchTool
@@ -60,7 +61,9 @@ def build_llm(cfg: dict):
     raise ValueError(f"unknown llm type: {cfg['type']}")
 
 
-def build_tool(cfg: dict):
+def build_tool(cfg: dict | None):
+    if cfg is None:  # direct / oracle 不检索
+        return None, None
     if cfg["type"] == "mock":
         return MockSearchTool(), {"source": "mock"}
     if cfg["type"] == "bm25":  # 进程内加载索引，适合调试
@@ -70,6 +73,22 @@ def build_tool(cfg: dict):
         tool = HttpSearchTool(cfg["url"], cfg.get("timeout_s", 5.0))
         return tool, tool.health()
     raise ValueError(f"unknown retrieval type: {cfg['type']}")
+
+
+def load_config(path: Path) -> dict:
+    """支持 extends：同一组对比实验继承同一份基础配置，只覆盖不同的字段。
+    解码参数、数据、预算只写一处，才能保证"统一解码参数"不是靠人抄对的。"""
+    cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if "extends" in cfg:
+        cfg = _deep_merge(load_config(path.parent / cfg["extends"]), cfg)
+    return cfg
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    merged = dict(base)
+    for k, v in override.items():
+        merged[k] = _deep_merge(base[k], v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return merged
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -82,7 +101,14 @@ def main() -> None:
     ap.add_argument("--allow-dirty", action="store_true", help="调试用：允许在有未提交改动时运行，结果目录带 -dirty 后缀")
     ap.add_argument("--limit", type=int, help="调试用：只跑前 N 题（写进 config.yaml 的 argv，结果不能当正式结论）")
     args = ap.parse_args()
-    cfg = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
+    cfg = load_config(Path(args.config))
+    if "name" not in cfg:
+        sys.exit("配置里没有 name：基础配置不能直接运行，请运行继承它的方法配置")
+    method = cfg.setdefault("method", "agent")
+    budget = Budget(**cfg["budget"])
+    check_budget(method, budget)  # 在建输出目录之前就检查，配错了不留半成品
+    if method in NEEDS_RETRIEVAL and not cfg.get("retrieval"):
+        sys.exit(f"{method} 需要 retrieval 配置")
 
     # 代码版本：有未提交改动时 commit hash 代表不了实际跑的代码，默认拒绝运行
     status = _git("status", "--porcelain")
@@ -99,13 +125,14 @@ def main() -> None:
         (out / "git_diff.patch").write_text(f"# git status\n{status}\n# git diff HEAD\n{_git('diff', 'HEAD')}",
                                             encoding="utf-8")
 
-    budget = Budget(**cfg["budget"])
     base_llm, llm_info = build_llm(cfg["llm"])
     llm = RetryingLLM(base_llm, **cfg["llm"].get("retry", {}))
-    tool, retrieval_info = build_tool(cfg["retrieval"])
+    tool, retrieval_info = build_tool(cfg.get("retrieval") if method in NEEDS_RETRIEVAL else None)
     data_dir = ROOT / cfg["data"]["dir"]
     split = cfg["data"]["split"]
     questions = read_jsonl(data_dir / "questions" / f"{split}.jsonl")[:args.limit]
+    # ⚠️ Oracle 诊断：防泄漏规则的唯一例外，答题前读金标段落（只许 validation / debug，见 evaluation/oracle.py）
+    gold_docs = load_gold_docs(data_dir, split) if method == "oracle" else {}
     manifest_path = data_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
 
@@ -115,7 +142,8 @@ def main() -> None:
         "run_id": run_id, "started_at": datetime.now().isoformat(timespec="seconds"),
         "git_commit": commit, "dirty": dirty, "argv": sys.argv,
         "data_manifest": manifest, "retrieval": retrieval_info, "llm_server": llm_info,
-        "system_prompt": SYSTEM_PROMPT,  # 模型看到的原文；改提示词不用翻 git 就能对比两次运行
+        # 模型看到的原文；改提示词不用翻 git 就能对比两次运行
+        "system_prompt": (AGENT_PROMPTS if method == "agent" else ANSWER_ONLY_PROMPTS).system,
         "env": {"python": platform.python_version(), "platform": platform.platform(),
                 **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml", "bm25s", "openai", "transformers")}},
     }
@@ -123,7 +151,7 @@ def main() -> None:
 
     trajectories, consecutive_errors = [], 0
     for i, q in enumerate(questions, 1):
-        traj = run_episode(q["qid"], q["question"], llm, tool, budget)
+        traj = run_method(method, q["qid"], q["question"], llm, tool, budget, gold_docs.get(q["qid"]))
         trajectories.append(traj)
         consecutive_errors = consecutive_errors + 1 if traj.stop_reason == StopReason.ERROR else 0
         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
@@ -139,12 +167,20 @@ def main() -> None:
         for traj in trajectories:
             label = labels[traj.qid]
             correct = exact_match(traj.final_answer, label["answer"])
+            f1 = f1_score(traj.final_answer, label["answer"])
             state = traj.budget_state
-            # 证据召回：整条轨迹检索到的段落里，覆盖了几个金标段落。把"搜得好不好"和"答得好不好"分开
+            # 证据召回：整条轨迹里模型看到的段落（含答题前给的证据），覆盖了几个金标段落。把"搜得好不好"和"答得好不好"分开
             retrieved = {d.doc_id for s in traj.steps if s.observation is not None for d in s.observation.docs}
+            if traj.context is not None:
+                retrieved |= {d.doc_id for d in traj.context.observation.docs}
             gold_ids = set(label.get("gold_doc_ids", []))
+            # 成本：假模型没有 token 数（None），这时整题记 None 而不是 0
+            prompt_tokens = [s.prompt_tokens for s in traj.steps]
+            completion_tokens = [s.completion_tokens for s in traj.steps]
+            has_tokens = None not in prompt_tokens and None not in completion_tokens
+            context_ms = traj.context.latency_ms if traj.context is not None else 0.0
             records.append({
-                "qid": traj.qid, "correct": correct, "error": traj.stop_reason == StopReason.ERROR,
+                "qid": traj.qid, "correct": correct, "f1": f1, "error": traj.stop_reason == StopReason.ERROR,
                 "stop_reason": traj.stop_reason.value, "prediction": traj.final_answer, "gold": label["answer"],
                 "type": label.get("type"),
                 "evidence_recall": len(gold_ids & retrieved) / len(gold_ids) if gold_ids else None,
@@ -154,19 +190,23 @@ def main() -> None:
                 "format_errors": sum(1 for s in traj.steps
                                      if s.observation is not None and s.observation.error_code in FORMAT_ERRORS),
                 "error_message": traj.error,
+                "prompt_tokens": sum(prompt_tokens) if has_tokens else None,
+                "completion_tokens": sum(completion_tokens) if has_tokens else None,
+                "latency_ms": context_ms + sum(s.llm_latency_ms + s.tool_latency_ms for s in traj.steps),
+                "llm_call_ms": [s.llm_latency_ms for s in traj.steps],
             })
             f.write(json.dumps({**traj.model_dump(mode="json"),
-                                "eval": {"gold": label["answer"], "em": correct,
+                                "eval": {"gold": label["answer"], "em": correct, "f1": f1,
                                          "gold_doc_ids": sorted(gold_ids), "evidence_recall": records[-1]["evidence_recall"]}},
                                ensure_ascii=False) + "\n")
 
-    metrics = aggregate(records)
+    metrics = {"method": method, "diagnostic_only": method == "oracle", **aggregate(records)}
     metrics["valid"] = metrics["failure_rate"] <= MAX_FAILURE_RATE
     metrics["llm_retries"] = llm.num_retries
     (out / "metrics.json").write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # errors.csv：没答对的题都进来，按类别分开，方便 badcase 分析
-    fields = ["qid", "type", "category", "stop_reason", "prediction", "gold", "evidence_recall", "turns",
+    fields = ["qid", "type", "category", "stop_reason", "prediction", "gold", "f1", "evidence_recall", "turns",
               "search_calls", "format_errors", "error_message"]
     with open(out / "errors.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
