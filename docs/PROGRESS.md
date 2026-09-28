@@ -6,7 +6,11 @@
 
 **Day 3 进行中（2026-09-28）。3.4 完成：四种方法（Direct / Static RAG / Agent / Oracle 诊断）共用一个入口，debug 集上各跑一次，出了第一张对比表。**
 
-**下一步：3.5** —— 人工看约 30 条轨迹（重点：比较题 Agent 为什么不如 Static RAG、查询改写得失），修格式报错提示，然后在 validation（200 题）上批量跑四种方法，出第一张正式基线表。
+**下一步：3.5 收尾** —— validation（200 题）四种方法已在 2026-09-28 23:30 启动（commit `8fa10f4` 之后的 `Keep baseline logs outside the repo`）：
+Direct `20260928-232955`、Static RAG `20260928-233043`、Oracle `20260928-233141` 已跑完；Agent `20260928-233230` 在跑（日志 `/root/autodl-tmp/logs/baselines_validation.log`）。
+重启后先 `ls outputs/runs/*agent-validation*/metrics.json` 看 Agent 是否跑完；**没有 metrics.json 就是没跑完**（轨迹只在最后一次性写盘），删掉那个目录，起两个服务后重跑：
+`python -m evaluation.run_eval --config configs/qwen3b_agent.yaml --split validation`（约 7 分钟）。然后汇总四种方法出正式基线表、跑 `experiments/day3_query_rewrite_analysis.py`、更新三份文档。
+已完成的 3.5 部分：人工看了 debug 上 Agent 和 Static RAG 结果不同的 12 题；报错提示按可用工具生成、先给作答写法；`--split` / `--final`；查询改写分析（debug：Agent 第一个查询比原问题变好 2 题、变差 7 题）。
 
 > 2026-09-28 关机前：3.3 还没开始写代码，工作区已提交并 push。重启后按下面清单起**两个**服务（检索 + vLLM），再从 3.3 开始。
 > 2026-09-28 恢复后：讲了 BM25（新增 "Who founded Apple" 词干化误合并的例子），用户回答了查询改写思考题，点评和实测排名见 LEARNING_NOTES「3.2 思考题」。结论：拆分方向对，但 `birth year` 式改写让两个实体的金标排名都变差，"实体名 + 类型词"才变好。
