@@ -102,12 +102,22 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="调试用：只跑前 N 题（写进 config.yaml 的 argv，结果不能当正式结论）")
     ap.add_argument("--split", help="覆盖配置里的 data.split（同一份方法配置跑 debug / validation / test）")
     ap.add_argument("--final", action="store_true", help="跑 test 集必须加：test 只在最后评测时跑，平时误跑会让人忍不住按它调参")
+    # 看解码波动用（Day 6）：主结果是贪心解码，换 seed 不改变输出；要看"换一次采样结论还在不在"，得开温度采样
+    ap.add_argument("--temperature", type=float, help="覆盖 llm.sampling.temperature；run_id 带 -t<值>")
+    ap.add_argument("--seed", type=int, help="覆盖 llm.sampling.seed（vLLM 每个请求的采样种子）；run_id 带 -s<值>")
     args = ap.parse_args()
     cfg = load_config(Path(args.config))
     if "name" not in cfg:
         sys.exit("配置里没有 name：基础配置不能直接运行，请运行继承它的方法配置")
     if args.split:
         cfg["data"]["split"] = args.split
+    sampling_tag = ""
+    if args.temperature is not None:
+        cfg["llm"]["sampling"]["temperature"] = args.temperature
+        sampling_tag += f"-t{args.temperature:g}"
+    if args.seed is not None:
+        cfg["llm"]["sampling"]["seed"] = args.seed
+        sampling_tag += f"-s{args.seed}"
     if cfg["data"]["split"] == "test" and not args.final:
         sys.exit("test 集只在最后评测时跑一次；确认要跑请加 --final。调参请用 --split validation。")
     if cfg.get("method") == "oracle" and cfg["data"]["split"] not in ORACLE_SPLITS:
@@ -123,7 +133,8 @@ def main() -> None:
     dirty = bool(status.strip())
     if dirty and not args.allow_dirty:
         sys.exit("工作区有未提交的改动，commit hash 无法代表本次代码。请先提交，或加 --allow-dirty 调试运行。")
-    run_id = f"{datetime.now():%Y%m%d-%H%M%S}-{cfg['name']}-{cfg['data']['split']}" + ("-dirty" if dirty else "")
+    run_id = (f"{datetime.now():%Y%m%d-%H%M%S}-{cfg['name']}-{cfg['data']['split']}{sampling_tag}"
+              + ("-dirty" if dirty else ""))
     out = ROOT / "outputs" / "runs" / run_id
     out.mkdir(parents=True)
     commit = _git("rev-parse", "HEAD").strip()
