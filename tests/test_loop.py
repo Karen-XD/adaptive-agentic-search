@@ -123,6 +123,14 @@ def test_max_turns_without_answer():
     assert traj.steps[-1].observation.error_code == ErrorCode.BUDGET_EXCEEDED  # 最后一轮还想搜
 
 
+def test_empty_answer_is_a_format_error_not_an_answer():
+    # validation 实测：模型写出 {"answer": ""}，不算作答，报错后重试
+    traj, llm = run(['<tool_call>{"name": "final_answer", "arguments": {"answer": "  "}}</tool_call>',
+                     call("final_answer", answer="Port Edvik")])
+    assert traj.steps[0].observation.error_code == ErrorCode.INVALID_ARGS
+    assert traj.stop_reason == StopReason.ANSWERED and traj.final_answer == "Port Edvik"
+
+
 def test_empty_results_are_ok_not_error():
     traj, llm = run([call("search", query="qwerty zzz"), call("final_answer", answer="unknown")])
     obs = traj.steps[0].observation
