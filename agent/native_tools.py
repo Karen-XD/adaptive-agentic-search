@@ -19,12 +19,15 @@ SEARCH_TOOL = {"type": "function", "function": {
                    "properties": {"query": {"type": "string", "description": "Search keywords"}},
                    "required": ["query"]}}}
 
+# 答案规范（Day 6，只在 validation 上调）：Day 5 错题分类里"答案形式"是最大的可修类（Agent 35 题）——
+# 人名只写了常用名（金标是文档里的全名）、数字丢了单位、是非题答成实体或整句。四种方法共用这一处
 FINAL_ANSWER_TOOL = {"type": "function", "function": {
     "name": "final_answer",
-    "description": "Give the final answer and end. The answer should be a short phrase such as a name, "
-                   "date or number, not a sentence.",
+    "description": "Give the final answer and end. For a yes/no question, answer only \"yes\" or \"no\". "
+                   "Otherwise copy the answer span exactly as it is written in the documents: use a person's "
+                   "full name as written, and keep units (e.g. \"18 days\"). Do not write a sentence.",
     "parameters": {"type": "object",
-                   "properties": {"answer": {"type": "string", "description": "Short final answer"}},
+                   "properties": {"answer": {"type": "string", "description": "The answer span"}},
                    "required": ["answer"]}}}
 
 
