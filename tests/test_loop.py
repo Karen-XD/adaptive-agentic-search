@@ -60,16 +60,8 @@ def test_format_error_fed_back_costs_turn_not_search():
     first = traj.steps[0]
     assert first.observation.error_code == ErrorCode.NO_ACTION
     assert (first.budget_state.turns_used, first.budget_state.search_calls_used) == (1, 0)
-    # 这一轮没有合法的工具调用：报错作为用户消息发回，不伪装成工具返回
-    assert llm.seen_messages[1][-1] == {"role": "user", "content": first.observation.message}
+    assert llm.seen_messages[1][-1] == {"role": "tool", "content": first.observation.message}
     assert traj.stop_reason == StopReason.ANSWERED
-
-
-def test_tool_results_and_policy_errors_stay_tool_role():
-    # 合法调用的返回（检索结果、重复查询被拦）仍然是 tool 消息
-    traj, llm = run([call("search", query="a"), call("search", query="a"), call("final_answer", answer="x")])
-    assert traj.steps[1].observation.error_code == ErrorCode.DUPLICATE_QUERY
-    assert [m["role"] for m in llm.seen_messages[2][-4:]] == ["assistant", "tool", "assistant", "tool"]
 
 
 def test_prompt_example_is_never_executed():

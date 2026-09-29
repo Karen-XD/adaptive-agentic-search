@@ -80,7 +80,7 @@ def test_format_hint_matches_available_tools():
     message = traj.steps[0].observation.message
     assert traj.steps[0].observation.error_code == ErrorCode.NO_ACTION
     assert '"name": "final_answer"' in message and "search" not in message
-    assert llm.seen_messages[1][-1] == {"role": "user", "content": message}
+    assert llm.seen_messages[1][-1] == {"role": "tool", "content": message}
 
     traj, _ = run("agent", outputs=["The answer is Port Edvik.", ANSWER], tool=SpyTool())
     message = traj.steps[0].observation.message

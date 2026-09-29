@@ -119,10 +119,9 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budg
             break
         messages.append({"role": "assistant", "content": generated})
         # role="tool"：Qwen2.5 的对话模板把它渲染成 user 轮次 + <tool_response>…</tool_response>（3.2 已核对）。
-        # 解析失败说明这一轮没有合法的工具调用，也就没有"工具返回"：报错作为普通用户消息发回，
-        # 不包进 <tool_response>，免得模型把报错当成检索结果
-        role = "user" if parsed.error is not None else "tool"
-        messages.append({"role": role, "content": render_observation(obs)})
+        # 试过把解析失败的报错改用普通 user 消息发回（免得模型把报错当成检索结果）：Agent 没有稳定收益，
+        # Direct 的重试反而变弱（同一个 }) 笔误连着两轮原样重复、多出 2 题没作答），已回退
+        messages.append({"role": "tool", "content": render_observation(obs)})
 
     return Trajectory(qid=qid, question=question, method=method, context=context, budget=budget,
                       steps=steps, budget_state=state,
