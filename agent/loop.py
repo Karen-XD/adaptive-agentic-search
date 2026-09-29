@@ -110,6 +110,7 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budg
 
         steps.append(Step(turn=state.turns_used, generated=generated, forced=forced,
                           num_tool_calls=parsed.num_tool_calls, unclosed_tool_call=parsed.unclosed,
+                          ignored_suffix=parsed.ignored_suffix, repaired_quotes=parsed.repaired_quotes,
                           action=action, observation=obs,
                           num_new_docs=num_new_docs, llm_latency_ms=llm_ms, tool_latency_ms=tool_ms,
                           prompt_tokens=gen.prompt_tokens, completion_tokens=gen.completion_tokens,
@@ -117,8 +118,11 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budg
         if answer is not None:
             break
         messages.append({"role": "assistant", "content": generated})
-        # role="tool"：Qwen2.5 的对话模板把它渲染成 user 轮次 + <tool_response>…</tool_response>（3.2 已核对）
-        messages.append({"role": "tool", "content": render_observation(obs)})
+        # role="tool"：Qwen2.5 的对话模板把它渲染成 user 轮次 + <tool_response>…</tool_response>（3.2 已核对）。
+        # 解析失败说明这一轮没有合法的工具调用，也就没有"工具返回"：报错作为普通用户消息发回，
+        # 不包进 <tool_response>，免得模型把报错当成检索结果
+        role = "user" if parsed.error is not None else "tool"
+        messages.append({"role": role, "content": render_observation(obs)})
 
     return Trajectory(qid=qid, question=question, method=method, context=context, budget=budget,
                       steps=steps, budget_state=state,

@@ -120,6 +120,8 @@ class Step(BaseModel):
     forced: bool                             # 本轮是否只许作答
     num_tool_calls: int
     unclosed_tool_call: bool = False         # 缺 </tool_call> 但 JSON 完整，按规则补上了（见 agent/parser.py）
+    ignored_suffix: str = ""                 # JSON 对象后面被丢掉的内容（见 agent/parser.py 的放宽规则）
+    repaired_quotes: bool = False            # 参数值里有没转义的引号，按单参数骨架取了值
     action: Optional[Action] = None          # 解析失败时为空
     observation: Optional[Observation] = None  # 作答那一轮没有观察
     num_new_docs: int = 0                    # 本轮检索结果里之前没见过的文档数，衡量这次搜索的边际收益

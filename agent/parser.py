@@ -18,8 +18,10 @@ from agent.schema import TOOL_NAMES, Action, ErrorCode, Observation
 
 # Qwen2.5 原生工具调用格式：标签负责定位，JSON 负责内容
 _TOOL_CALL = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
-# 结尾标签缺失：最后一个 <tool_call> 之后直到输出结束的全部内容
-_UNCLOSED_TAIL = re.compile(r"<tool_call>((?:(?!<tool_call>).)*)\Z", re.DOTALL)
+# 引号没转义时的固定骨架。两个工具都只有一个字符串参数，值只能到最后一个 "}} 为止，边界没有歧义
+_ONE_STRING_ARG = re.compile(r'\{\s*"name"\s*:\s*"(\w+)"\s*,\s*"arguments"\s*:\s*\{\s*"(\w+)"\s*:\s*"(.*)"\s*\}\s*\}',
+                             re.DOTALL)
+_ANOTHER_ARG = re.compile(r'"\s*,\s*"\w+"\s*:')  # 值里像是还有第二个参数：不是单参数骨架，不修
 _ACTION = TypeAdapter(Action)
 
 
@@ -28,7 +30,10 @@ class ParseResult:
     action: Optional[Action] = None      # 解析成功时有值
     error: Optional[Observation] = None  # 解析失败时有值，作为本轮观察拼回给模型
     num_tool_calls: int = 0              # 本轮写了几个 tool_call；只执行第一个，个数记进轨迹
-    unclosed: bool = False               # 缺结尾标签但按下面的规则补上了；记进轨迹，统计这类输出有多少
+    # 下面三个是放宽解析的标记，都记进轨迹，统计每类放宽救回了多少轮
+    unclosed: bool = False               # 缺结尾标签
+    ignored_suffix: str = ""             # JSON 对象后面被丢掉的内容
+    repaired_quotes: bool = False        # 参数值里的引号没转义，按单参数骨架取值
 
 
 def _fail(code: ErrorCode, what: str, num_tool_calls: int = 0) -> ParseResult:
@@ -50,31 +55,41 @@ def _parse(generated: str) -> ParseResult:
 
     # 语法层：严格模式，没有 tool_call 的纯文字不当答案；所有方法共用这条规则
     if n == 0:
-        if "<tool_call>" in generated:
-            # 唯一的放宽：缺 </tool_call>，但标签后面直到结尾恰好是一个完整的 JSON 对象，意图没有歧义，照常解析。
-            # Qwen2.5-3B 先写推理文字、再写调用时，常在 JSON 写完后直接结束（3.3 实测 5 个格式错误里 4 个是这样）。
-            # 输出被截断时 JSON 不完整，解析不了，仍然报错
-            tail = _UNCLOSED_TAIL.search(generated)
-            if tail and _is_json_object(tail.group(1)):
-                result = _parse_block(tail.group(1), 1)
-                result.unclosed = True
-                return result
+        if "<tool_call>" not in generated:
+            return _fail(ErrorCode.NO_ACTION, "no tool call found")
+        # 缺 </tool_call>：取第一个 <tool_call> 之后的内容，照样按"第一个完整 JSON 对象"解析。
+        # Qwen2.5-3B 常在 JSON 写完后直接结束（3.3），或跟一段乱码 / 半个新调用（3.5 强制轮 4 次）。
+        # 输出被截断时 JSON 不完整，解析不了，仍然报错
+        result = _parse_block(generated.split("<tool_call>", 1)[1], 1)
+        if result.error is not None and result.error.error_code == ErrorCode.INVALID_JSON:
             return _fail(ErrorCode.NO_ACTION, "found <tool_call> without a closing </tool_call>")
-        return _fail(ErrorCode.NO_ACTION, "no tool call found")
+        result.unclosed = True
+        return result
     return _parse_block(blocks[0], n)
 
 
-def _is_json_object(text: str) -> bool:
+def _decode(block: str) -> tuple[object, str, bool]:
+    """返回 (JSON 值, 被丢掉的后缀, 是否修过引号)；解析不了抛 JSONDecodeError。
+
+    只取第一个完整的 JSON 值，后面的内容丢掉：和停止词的语义一致——模型若写了 </tool_call>，
+    停止词本来就会截掉后面的一切，只执行第一个动作；只因为漏了结尾标签就判成没作答，口径不一致。
+    """
+    text = block.strip()
     try:
-        return isinstance(json.loads(text), dict)
+        obj, end = json.JSONDecoder().raw_decode(text)
+        return obj, text[end:].strip(), False
     except json.JSONDecodeError:
-        return False
+        m = _ONE_STRING_ARG.match(text)
+        # 引号修复：模型在参数值里原样写了双引号（validation 上同一题 Static RAG 连续 4 次重试都这样写，重试救不回来）
+        if m is None or _ANOTHER_ARG.search(m.group(3)):
+            raise
+        return {"name": m.group(1), "arguments": {m.group(2): m.group(3)}}, text[m.end():].strip(), True
 
 
 def _parse_block(block: str, n: int) -> ParseResult:
     # 每轮只执行一个动作，取第一个（与 Search-R1 训练代码一致）
     try:
-        obj = json.loads(block)
+        obj, suffix, repaired = _decode(block)
     except json.JSONDecodeError as e:
         return _fail(ErrorCode.INVALID_JSON, f"tool call is not valid JSON ({e.msg})", n)
 
@@ -85,7 +100,8 @@ def _parse_block(block: str, n: int) -> ParseResult:
         return _fail(ErrorCode.UNKNOWN_TOOL,
                      f"unknown tool {obj['name']!r}, available tools: {', '.join(TOOL_NAMES)}", n)
     try:
-        return ParseResult(action=_ACTION.validate_python(obj), num_tool_calls=n)
+        return ParseResult(action=_ACTION.validate_python(obj), num_tool_calls=n,
+                           ignored_suffix=suffix, repaired_quotes=repaired)
     except ValidationError as e:
         err = e.errors()[0]
         field = ".".join(str(x) for x in err["loc"])

@@ -197,6 +197,9 @@ def main() -> None:
                 "new_docs": sum(s.num_new_docs for s in traj.steps),
                 "format_errors": sum(1 for s in traj.steps
                                      if s.observation is not None and s.observation.error_code in FORMAT_ERRORS),
+                "unclosed_calls": sum(s.unclosed_tool_call for s in traj.steps),
+                "ignored_suffixes": sum(bool(s.ignored_suffix) for s in traj.steps),
+                "repaired_quotes": sum(s.repaired_quotes for s in traj.steps),
                 "error_message": traj.error,
                 "prompt_tokens": sum(prompt_tokens) if has_tokens else None,
                 "completion_tokens": sum(completion_tokens) if has_tokens else None,

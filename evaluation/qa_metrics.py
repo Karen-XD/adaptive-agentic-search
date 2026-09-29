@@ -71,6 +71,9 @@ def aggregate(records: list[dict]) -> dict:
         "mean_turns": total_turns / n,
         # 格式错误轮次占比：Day 3 接真模型后判断"模型会不会写工具调用"的第一个指标
         "format_error_rate": sum(r["format_errors"] for r in records) / total_turns if total_turns else 0.0,
+        # 放宽解析各救回了多少轮（规则见 agent/parser.py）；放宽要窄，所以要一直盯着这几个数
+        "lenient_parses": {k: sum(r.get(k, 0) for r in records)
+                           for k in ("unclosed_calls", "ignored_suffixes", "repaired_quotes")},
         "mean_new_docs_per_call": sum(r["new_docs"] for r in records) / total_calls if total_calls else 0.0,
         "stop_reasons": dict(Counter(r["stop_reason"] for r in records)),
         **_evidence_metrics(records),
