@@ -61,7 +61,7 @@ tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda act
 curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 95 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 120 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
