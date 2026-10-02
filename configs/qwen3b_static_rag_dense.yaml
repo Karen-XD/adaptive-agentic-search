@@ -1,0 +1,10 @@
+# B1 Static RAG + Dense：和 qwen3b_static_rag.yaml 唯一的不同是检索器换成向量检索。
+# 注意 name 会进 run_id，改成 qwen3b-static-rag-dense 以便和 BM25 版本区分。
+extends: qwen3b_base.yaml
+name: qwen3b-static-rag-dense
+method: static_rag
+budget: {max_search_calls: 1}
+retrieval:
+  type: http
+  url: http://127.0.0.1:8100
+  method: dense

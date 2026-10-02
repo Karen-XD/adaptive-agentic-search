@@ -1,0 +1,8 @@
+# Vanilla Agent + Dense：和 qwen3b_agent.yaml 唯一的不同是检索器换成向量检索。
+extends: qwen3b_base.yaml
+name: qwen3b-agent-dense
+method: agent
+retrieval:
+  type: http
+  url: http://127.0.0.1:8100
+  method: dense
