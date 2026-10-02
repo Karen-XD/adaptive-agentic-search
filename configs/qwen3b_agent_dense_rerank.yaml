@@ -1,0 +1,10 @@
+# B3 候选：agent + dense 取 20 条候选 → bge-reranker-base 重排 → 前 top_k 条。除检索外与 qwen3b_agent.yaml 完全相同。
+# 检索服务要带 --reranker 启动（docs/PROGRESS.md 恢复清单）。
+extends: qwen3b_base.yaml
+name: qwen3b-agent-dense-rerank
+method: agent
+retrieval:
+  type: http
+  url: http://127.0.0.1:8100
+  method: dense
+  rerank: true

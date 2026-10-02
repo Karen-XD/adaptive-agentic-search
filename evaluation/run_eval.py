@@ -70,11 +70,13 @@ def build_tool(cfg: dict | None):
         tool = BM25SearchTool(ROOT / cfg["index"])
         return tool, {"source": tool.source, "index": tool.meta}
     if cfg["type"] == "http":  # 连检索服务，正式实验用这个；先问 /health，确认连的是哪个索引
-        tool = HttpSearchTool(cfg["url"], cfg.get("timeout_s", 5.0), cfg.get("method", "bm25"))
+        tool = HttpSearchTool(cfg["url"], cfg.get("timeout_s", 5.0), cfg.get("method", "bm25"), cfg.get("rerank", False))
         info = tool.health()
         if tool.method not in info["methods"]:  # 服务没加载这一路就别开跑，否则每次搜索都是 tool_error
             sys.exit(f"retrieval method {tool.method!r} not loaded by server: {sorted(info['methods'])}")
-        return tool, {"method": tool.method, **info}
+        if tool.rerank and not info.get("reranker"):
+            sys.exit("config asks for rerank but the server has no reranker loaded")
+        return tool, {"method": tool.method, "rerank": tool.rerank, **info}
     raise ValueError(f"unknown retrieval type: {cfg['type']}")
 
 

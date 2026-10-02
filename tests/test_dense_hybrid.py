@@ -113,3 +113,72 @@ def test_dense_same_query_same_results(dense_tool):
 @pytest.mark.parametrize("query", ["", "   "])
 def test_dense_empty_query_returns_empty(dense_tool, query):
     assert dense_tool.search(query, 3) == []
+
+
+# ---------- 重排 ----------
+
+class FakeReranker:
+    """按文档 id 查表打分，不依赖模型。"""
+
+    def __init__(self, table: dict[str, float]):
+        self.table = table
+        self.meta = {"model_path": "fake"}
+        self.calls: list[int] = []
+
+    def score(self, query, docs):
+        self.calls.append(len(docs))
+        return [self.table.get(d.doc_id, 0.0) for d in docs]
+
+
+def test_rerank_reorders_pool_and_keeps_top_k():
+    from retrieval.rerank import RerankedSearchTool
+    base = FakeTool(list("abcde"), "dense", list("abcde"))
+    rr = FakeReranker({"e": 3.0, "c": 2.0, "a": 1.0})
+    tool = RerankedSearchTool(base, rr, pool_size=5)
+    docs, timing = tool.search_timed("q", 2)
+    assert [d.doc_id for d in docs] == ["e", "c"] and [d.rank for d in docs] == [1, 2]
+    assert docs[0].source == "dense+rerank" and docs[0].score == 3.0
+    assert base.calls == [5] and rr.calls == [5]  # 候选池按 pool_size 取，不按 top_k
+    assert timing["num_candidates"] == 5 and {"retrieve_ms", "rerank_ms"} <= set(timing)
+
+
+def test_rerank_ties_broken_by_doc_id_and_empty_pool():
+    from retrieval.rerank import RerankedSearchTool
+    tool = RerankedSearchTool(FakeTool(["c", "a", "b"], "bm25", list("abc")), FakeReranker({}), pool_size=3)
+    assert [d.doc_id for d in tool.search("q", 3)] == ["a", "b", "c"]  # 全部同分：按 doc_id
+    empty = RerankedSearchTool(FakeTool([], "bm25", []), FakeReranker({}), pool_size=3)
+    assert empty.search("q", 3) == []  # 检索器没结果时不调用重排模型
+
+
+def test_service_rerank_flag():
+    from retrieval.rerank import RerankedSearchTool
+    corpus = list("abc")
+    bm25 = FakeTool(["a", "b", "c"], "bm25", corpus)
+    rr = FakeReranker({"c": 1.0})
+    client = TestClient(create_app({"bm25": bm25}, {"bm25": RerankedSearchTool(bm25, rr, pool_size=3)}))
+    plain = client.post("/search", json={"query": "q", "top_k": 1, "method": "bm25"}).json()
+    ranked = client.post("/search", json={"query": "q", "top_k": 1, "method": "bm25", "rerank": True}).json()
+    assert plain["docs"][0]["doc_id"] == "a" and plain["rerank"] is False and plain["timing"] is None
+    assert ranked["docs"][0]["doc_id"] == "c" and ranked["rerank"] is True and ranked["timing"]["num_candidates"] == 3
+    assert client.get("/health").json()["reranker"] == {"model_path": "fake"}
+    no_rr = TestClient(create_app({"bm25": bm25}))
+    assert no_rr.post("/search", json={"query": "q", "top_k": 1, "rerank": True}).status_code == 400
+    assert no_rr.get("/health").json()["reranker"] is None
+
+
+BGE_PATH = Path("/root/autodl-tmp/hf_models/bge-reranker-base")
+
+
+def test_cross_encoder_prefers_relevant_passage():
+    if not BGE_PATH.exists():
+        pytest.skip("bge-reranker-base not downloaded")
+    from retrieval.rerank import CrossEncoderReranker
+    rr = CrossEncoderReranker(BGE_PATH, device="cpu")
+    docs = [Doc(doc_id=i, title=t, text=x, score=0.0, rank=r, source="bm25") for r, (i, t, x) in enumerate([
+        ("d1", "Port Edvik", "Port Edvik is a harbor town with a lighthouse."),
+        ("d2", "Luminara Labs", "Luminara Labs is a company that makes telescopes."),
+        ("d3", "Tessa Marrow", "Tessa Marrow is an engineer who was born in Port Edvik."),
+    ], 1)]
+    scores = rr.score("Where was Tessa Marrow born?", docs)
+    assert max(range(3), key=scores.__getitem__) == 2
+    assert rr.score("Where was Tessa Marrow born?", docs) == scores  # 同样输入同样分数
