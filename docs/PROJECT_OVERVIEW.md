@@ -161,10 +161,19 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 - **关键发现**：在这个强检索下，多轮 Agent 不比单次强（4 个设定都不显著），成本 4～5 倍。
 - 在全局里的意义：**V2 主线改成"按需升级"（级联）**——默认走便宜的 B3，只在不确定时升级成多轮。两者逐题取较好的上限比 B3 高 8～13 个点。
 
+### Day 10：查询改写（✅ 2026-10-02）
+
+三组公平对照，都用固定检索计划（每题搜几次是定好的，只比查询写得好不好），检索栈和作答提示词与 B3 相同：
+- 只看问题的一次性改写**代替**原问题：显著更差（EM −8.5、召回 −10.8）
+- 两跳、第二跳不看证据：白搜（EM −4.5 显著更差）
+- 两跳、第二跳看第一跳结果：召回 +4.5 显著、EM +2.0 不显著；两段全齐 0.685 → 0.770
+- 意外收获：改写那一步"拒绝再搜"的题（56%）证据和 B3 逐条相同、准确率完全一致 → 这是按需升级的现成判据
+- 在全局里的意义：查询改写的价值不在"改写一次"，而在"根据已看到的证据改写"；升级信号也落到了实处
+
 ### 接下来（V2）
 
-- **Day 10**：查询改写三组对照，在 Dense + 重排上做；2Wiki 组合题测问题拆解
-- **Day 11～12**：统一策略接口 + 按需升级的主实验（信号：答案一致性 × 证据信号），和 B3 比质量–成本
+- **Day 10.4**：2Wiki 组合题测问题拆解（候选池里就缺金标）
+- **Day 11～12**：统一策略接口 + 按需升级的主实验（信号：改写步"拒绝再搜" × 答案一致性），和 B3 比质量–成本
 - **Day 13～14**：商品搜索后端，Stop Point 2
 
 ## 6. 现在怎么运行
@@ -173,7 +182,7 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 conda activate dsr1
 cd /root/adaptive-agentic-search
 
-pytest tests/                                                # 135 个测试
+pytest tests/                                                # 144 个测试
 
 # 一次性准备（数据和索引不进 git，实例释放后要重建）
 python -m data_prep.prepare_hotpot                           # 语料池 + 题目划分 + 数据清单
@@ -204,6 +213,7 @@ python -m experiments.day9_rerank_compare --data data/hotpotqa/v1 --split valida
     --bm25-index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5             # 重排离线对比
 bash experiments/run_b3_candidates.sh validation                                             # B3 候选端到端
 bash experiments/run_seeds_b3.sh validation                                                  # B3 候选 3 个 seed
+bash experiments/run_rewrite.sh validation                                                   # Day 10 改写对照
 python -m data_prep.prepare_2wiki                                                            # 2Wiki 语料池 + 分析集
 python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
     --bm25-index indexes/2wiki_pool_v1_bm25 --dense-index indexes/2wiki_pool_v1_e5             # 路由上限（HotpotQA 同理）
@@ -223,14 +233,14 @@ python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
 
 | 目录 | 放什么 | 现状 |
 |---|---|---|
-| `agent/` | 数据结构、解析器、循环、提示词、模型接口、四种方法（`methods.py`） | Day 1 完成；Day 3 接入 vLLM 客户端、原生工具提示词、基线方法 |
+| `agent/` | 数据结构、解析器、循环、提示词、模型接口、方法（`methods.py`）、改写流程（`rewrite.py`） | Day 1 骨架；Day 3 接模型；Day 10 改写 |
 | `retrieval/` | 检索工具：假检索、BM25、向量检索（`dense.py`）、RRF 混合（`hybrid.py`）、重排（`rerank.py`）、检索服务和客户端 | Day 2 BM25；Day 8 向量 + 混合；Day 9 重排 |
 | `evaluation/` | 评测指标（EM、F1、证据召回、成本）、实验入口、Oracle 金标读取 | Day 3 补齐基线所需指标 |
 | `experiments/` | 一次性分析脚本：提示词格式对比、查询改写分析、错题分类（`day5_error_taxonomy.py`，`--show qid` 重放单题） | 随各 Day 增加 |
 | `configs/` | 实验配置 | `qwen3b_base.yaml` + 四个继承它的方法配置（划分由 `--split` 指定）；`mock_v1.yaml`、`bm25_debug.yaml` |
 | `data_prep/` | 数据准备、数据体检 | HotpotQA 完成 |
 | `data/`、`indexes/` | 数据和索引（不进 git） | HotpotQA、2Wiki 两个语料池，各有 BM25 和 e5 向量索引 |
-| `tests/` | 自动测试 | 135 个 |
+| `tests/` | 自动测试 | 144 个 |
 | `third_party/Search-R1/` | 上游源码，只读参考 | 锁定在 `598e61b` |
 
 ## 8. 面试一分钟版（随进度更新）
