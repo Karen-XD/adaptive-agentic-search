@@ -14,6 +14,26 @@
 - 互补性有限：前 5 条里的金标，两路都找到 229 段、只有 Dense 79 段、只有 BM25 20 段（全是桥接题）、都没找到 72 段
 - 成本（CPU、进程内）：BM25 中位数约 8ms（原问题）/ 27ms（Agent 短查询，原因未查）；Dense 约 40～55ms（查询编码约 21ms + FAISS 暴力搜约 27ms）；Hybrid 约 65ms。V1 每次模型调用中位数 492ms → 检索耗时不是成本大头。内存：BM25 +0.9GB、Dense +2.2GB；磁盘 449MB / 1.8GB
 
+**Day 8.6 换检索器重跑基线（2026-10-02）：召回大幅提高，准确率没有跟着提高。**
+
+| validation 200 题 | Static RAG (BM25) | Static RAG (Dense) | Agent (BM25) | Agent (Dense) |
+|---|---|---|---|---|
+| EM | 0.320 | 0.300 | 0.355 | 0.375 |
+| F1 | 0.428 | 0.433 | 0.487 | 0.507 |
+| 证据召回 | 0.565 | **0.710** | 0.677 | **0.735** |
+| 证据全齐的题 | 56 | **95** | 98 | 108 |
+| 平均搜索次数 | 1.00 | 1.00 | 1.88 | 1.84 |
+
+- 配对 bootstrap：Static RAG EM **−2.0 [−8.0, +4.0]**，Agent EM **+2.0 [−4.5, +8.0]**，都不显著
+- **错因四分法**（证据是否全齐 × 是否答对），Static RAG：
+  - BM25：齐+对 26 / 齐+错（读不对）30 / 缺+对（蒙对）38 / 缺+错（搜不到）106
+  - Dense：齐+对 38 / 齐+错 **57** / 缺+对 22 / 缺+错 83
+  - 证据全齐多了 39 题，但只有 12 题从错变对，另外 27 题**补上证据以后还是答错**；"蒙对"从 38 降到 22
+  - Agent：齐+对 47→51，齐+错 51→**57**，缺+错 78→68
+- **召回变化和答案变化对不上**：Static RAG 里召回变高的 69 题净 +7，召回变低的 18 题净 −6，**召回不变的 113 题净 −5**（换了检索器，即使召回水平一样，答案也会变，7 题由对变错）
+- 结论：**检索已经不是瓶颈了**。Dense 把"搜不到"从 106 题压到 83 题，但错误整体迁移到"读不对"（30 → 57）和答案形式。V1 报告里的判断（错误从"搜不到"变成"读不对"和"停不准"）在更强的检索器下更成立
+- 运行：`20261002-124659-qwen3b-static-rag-dense-validation`、`20261002-124808-qwen3b-agent-dense-validation`（commit `fbb162b` 之后，代码干净）；配置 `configs/qwen3b_{static_rag,agent}_dense.yaml`，脚本 `experiments/run_baselines_dense.sh`
+
 **Day 8.7 路由上限分析（2026-10-02）：结论是"换检索器"这条线的空间很小，而且换第二个数据集也救不回来；真正的空间在查询构造。** 两数据集同一套代码（`experiments/routing_ceiling.py`）：
 
 | 口径（金标召回@3） | HotpotQA validation | 2Wiki analysis |
@@ -107,7 +127,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - 只有 Dense（79 段，比较题 25）：① 用描述代替名字（"Queen of Denmark" → Hamlet (1996 film)，"中国官方通讯社的社长" → Liao Chengzhi）；② 要找"讲的就是这个实体"的段落：Mick Jagger 被很多段落提到，BM25 把"提到"的排前面，Dense 把"关于他"的排前面
   - 一句话：**BM25 匹配"提到"，Dense 匹配"关于"**
 - [x] 8.5 验收：检索服务带 `--dense-index` 起在 tmux `retriever`；三种 method 返回统一的 ID / 分数 / 名次 / 来源 / 耗时；不传 method 默认 bm25；未加载的 method 400、未知的 422
-- [ ] 8.6 提交后在干净 commit 上重跑对比；换检索器重跑 Static RAG / Agent（要起 vLLM）
+- [x] 8.6 提交（`fbb162b`）后在干净 commit 上重跑：① 检索对比结论不变；② 换 Dense 重跑 Static RAG / Agent（vLLM + 三路检索服务），结果见"当前位置"——**召回大涨、准确率不动，检索不再是瓶颈**
 - [x] 8.7 路由上限分析（2026-10-02）：`data_prep/prepare_2wiki.py` + `experiments/routing_ceiling.py`；结果见"当前位置"
   - 2Wiki 数据：语料池 38.5 万段（train + dev 的上下文去重），分析集从 train 按题型分层各抽 500 题（2000 题）；金标 = supporting_facts 里的标题（比较 / 组合 / 推理题 2 段，桥接比较题 4 段），和 HotpotQA 同一口径
   - 2Wiki 的 evidences 三元组给了"理想子查询"的构造：每个（实体, 关系）造一个查询，实体名去掉括号里的消歧义词（Agent 从正文里读到的名字不带它）
