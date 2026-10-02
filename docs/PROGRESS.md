@@ -116,6 +116,22 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
 
+## Day 9 子步骤
+
+- [x] 9.1 重排模型：bge-reranker-base（XLM-RoBERTa base，1.1GB，hf-mirror 下载，sha256 `ced967c4…` 和 HF 一致）
+  - 选它的原因：现成、base 尺寸、在 MS MARCO 等问答相关性数据上训练过；MiniLM 系列更快但更弱，v2-m3 更强但大 2 倍（568M 参数）、要更多显存，先用 base 量出重排有没有用
+  - 冒烟（40 题 × 20 候选）：GPU fp16 每次 18ms（p95 25ms），CPU fp32 888ms → 必须放 GPU；fp16 和 fp32 前 3 名顺序 36/40 一致，最大 logit 差 0.012；显存约 0.7GB
+- [x] 9.2 `retrieval/rerank.py`（`CrossEncoderReranker` + `RerankedSearchTool`，耗时拆成检索 / 重排 / 候选数）；服务 `/search` 加 `rerank` 开关（和 `method` 独立）；客户端、`run_eval`（配置 `retrieval.rerank`）跟着改；测试 135 个通过
+- [x] 9.3 离线重排对比 `experiments/day9_rerank_compare.py`（6 种组合：3 个检索器 × 重排与否，候选池 20）
+  - HotpotQA validation（召回@3）：BM25 0.565 → **0.740**（+17.5）、Dense 0.710 → **0.823**（+11.3）、Hybrid 0.688 → **0.828**（+14.0），都显著；两段都齐@3：Dense 0.475 → 0.685
+  - 重排后 Dense ≈ Hybrid（−0.5 [−2.0, +0.7]）：**重排抹平了检索器之间的差距**，候选池里只要有金标，重排就能把它排上来
+  - 补上的缺口（重排后@3 − 重排前@3）/（候选池@20 − 重排前@3）：BM25 88%、Dense 73%、Hybrid 77%
+  - 比较题：Dense / Hybrid + 重排前 3 条召回 1.000；桥接题 Dense + 重排 0.777（候选池@20 只有 0.830，上限就在这里）
+  - V1 Agent 查询重放（top_k=3）：BM25 0.677 → 0.795、Dense 0.765 → 0.828、Hybrid 0.760 → 0.830
+  - 2Wiki analysis：Dense 0.588 → 0.651、Hybrid 0.602 → **0.657**（重排后 Hybrid 略强，+0.5 [+0.2, +0.9]，显著但很小）；组合题只到 0.546、桥接比较题 0.516 → **重排救不了"候选池里没有"**（组合题候选池@20 只有 0.573）
+  - 耗时：每次重排 20 条候选，GPU 中位数 16ms（HotpotQA）/ 19ms（2Wiki），p95 23～29ms；输入长度中位数 135 token、p95 255
+- [ ] 9.4 端到端 B3 候选：Static RAG / Agent × Dense + 重排 / Hybrid + 重排（`experiments/run_b3_candidates.sh`）
+
 ## Day 8 子步骤
 
 - [x] 8.1 向量索引（2026-10-02）：e5-base-v2（ModelScope 下载，sha256 和 HF 一致）；`dsr1` 装 faiss-cpu 1.15.1（numpy 2.2.6 不变）；`retrieval/dense.py`；50.7 万段 GPU fp16 编码 229s，`IndexFlatIP` 1.8GB
@@ -400,6 +416,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-02 | `/search` 加 `method`，默认 bm25；没加载的 method 返回 400，`run_eval` 开跑前检查服务有没有这一路 | V1 配置不传 method，原样可复现；不悄悄退回 BM25，否则对比会失真 |
 | 2026-10-02 | 融合用等权 RRF（k=60，每路取 20），同分按 doc_id；融合前检查两个索引的 doc_id 顺序完全一致 | 两路分数量纲不同，RRF 不需要校准；k=60 沿用 Cormack 2009；doc_id 是标题哈希，同分时不偏向哪一路；ID 对不上就报错，不融合错的东西 |
 | 2026-10-02 | 检索对比脚本只跑 validation / debug（拒绝 test）；输出 `per_question.jsonl` 代替 `trajectories.jsonl` / `errors.csv` | 阈值和结论只在 validation 上得；纯检索分析没有作答轨迹 |
+| 2026-10-02 | 重排模型用 bge-reranker-base，放 GPU fp16，候选池 20 → 输出 top_k | CPU 上一次 0.9s，太慢；GPU 上 18ms、约 0.7GB 显存，和 vLLM（约 19.5GB）共存没问题；Agent 单并发串行，重排和生成不会同时抢 GPU。候选池 20 沿用计划起步值 |
+| 2026-10-02 | 重排输入 = （查询, `标题\n正文`），超长只截段落（`truncation="only_second"`）；同分按 doc_id | 和 BM25 / 向量检索一样带标题；查询要完整保留；fp16 下几乎重复的段落可能同分，要固定顺序 |
+| 2026-10-02 | `rerank` 是 `/search` 上和 `method` 独立的开关；没加载重排模型时 `rerank=true` 返回 400 | V2 策略里"选检索器"和"要不要重排"是两个独立动作；不悄悄跳过重排，否则对比失真 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
