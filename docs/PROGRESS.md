@@ -7,6 +7,33 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
+**Day 9 完成（2026-10-02）：HotpotQA 的 B3 强固定基线定为 Static RAG + Dense + 重排（只搜一次）；在这个强检索下，多轮 Agent 不比单次检索强。**
+
+| validation 200 题，EM | 贪心 | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|---|
+| Static RAG + BM25（V1 B1） | 0.320 | 0.320 | 0.310 | 0.340 |
+| Static RAG + Dense | 0.300 | 0.305 | 0.295 | 0.320 |
+| **Static RAG + Dense + 重排（B3）** | **0.405** | 0.395 | 0.405 | 0.430 |
+| Static RAG + Hybrid + 重排 | 0.390 | 0.380 | 0.380 | 0.405 |
+| Agent + BM25（V1 B2） | 0.355 | 0.300 | 0.355 | 0.335 |
+| Agent + Dense + 重排 | 0.390 | 0.360 | 0.440 | 0.365 |
+| Agent + Hybrid + 重排 | 0.390 | 0.370 | 0.420 | 0.370 |
+
+配对 bootstrap，按 V2 口径（多数 seed 显著才算显著）：
+- B3 − V1 Static RAG：EM +7.5～+9.5，**4/4 显著**；F1 +11.9～+13.0，4/4 显著 → 换强检索 + 重排是这一阶段最大的单项提升
+- 重排的贡献（Dense + 重排 − Dense）：EM +9.0～+11.0，**4/4 显著**
+- Hybrid + 重排 − Dense + 重排（Static RAG）：EM −1.5～−2.5，0/4 显著；F1 −2.2～−3.1，**3/4 显著变差** → Dense + 重排当 B3：不比 Hybrid 差，而且少跑一路 BM25
+- **Agent + Dense + 重排 − B3：EM −6.5～+3.5，0/4 显著**；F1 1/4 显著变差。Agent + Hybrid + 重排同样 0/4
+- 成本：B3 每题 1 次检索、输入 589 token、端到端 p50 308ms；Agent + Dense + 重排 1.72 次检索、输入 2314 token（3.9 倍）、p50 1525ms（5 倍）。证据召回 B3 0.823 反而高于 Agent 的 0.807（Agent 改写的查询不如原问题，Day 3 已见过）
+- **按需升级的空间**：B3 和 Agent + Dense + 重排逐题取较好的一个，EM 0.505～0.545（比 B3 高 11～13 个点，含解码噪声）；4 个设定里 Agent 稳定赢（≥3 次）16 题、B3 稳定赢 22 题。Agent 稳定赢的 16 题里 **10 题 B3 第一次检索就已证据全齐** → 升级的触发信号不能只看"证据缺不缺"
+- 运行：贪心 4 组（commit `2d14968`）、seed 15 组（commit `6a12252`）；脚本 `experiments/run_b3_candidates.sh`、`experiments/run_seeds_b3.sh`
+
+**对 V2 主线的影响**：要打败的不再是"Agent 多搜几次"，而是一个只搜一次、又便宜又强的 B3。V2 的问题变成**按需升级（cascade，级联）**：默认走 B3，只在信号表明需要时才升级成多轮。上限约 +8（稳定口径）～+13（单次口径），成本主要省在"不升级"的题上。
+
+> **更正（2026-10-02）**：Day 8.6 写的"检索已经不是瓶颈"说过头了。Dense 提高的是多段并集的召回，但两段金标同时进前 3 的题只从 56 涨到 95；加重排后涨到 137，EM 才跟着涨（0.300 → 0.405）。瓶颈在**前 3 条的精度**（两段金标是否同时进前 3），不在召回广度。阅读问题也仍在（B3 里"证据齐 + 答错"71 题）。
+
+**下一步：** Day 10 查询改写（原问题 / 静态改写 / 证据条件改写），在 B3 的检索栈（Dense + 重排）上做；同时准备按需升级的信号（答案一致性 × 证据信号，见待办）。2Wiki 的 B3 还没端到端跑（离线 Hybrid + 重排略强 +0.5）。
+
 **Day 8 检索部分完成（2026-10-02）：BM25 / Dense / Hybrid 三路检索走同一个 `/search`，验收通过。** validation 200 题、原问题搜一次的发现（运行 `20261002-114642-day8-retriever-compare-validation-dirty`，代码未提交时跑的，重跑逐题一致）：
 - **Dense（e5-base-v2）大幅领先 BM25**：召回@3 0.565 → 0.710（+14.5 [+9.8, +19.3]），两段都找齐@3 0.28 → 0.475；比较题 0.585 → 0.976，桥接题 0.560 → 0.641
 - **Dense 搜一次（0.710）已经高于 V1 Agent 用 BM25 搜多轮（0.677）**：换检索器的收益比多轮的收益还大。同一批 Agent 查询换成 Dense 重放：0.677 → 0.765（+8.8 [+4.5, +13.0]）
@@ -31,7 +58,7 @@
   - 证据全齐多了 39 题，但只有 12 题从错变对，另外 27 题**补上证据以后还是答错**；"蒙对"从 38 降到 22
   - Agent：齐+对 47→51，齐+错 51→**57**，缺+错 78→68
 - **召回变化和答案变化对不上**：Static RAG 里召回变高的 69 题净 +7，召回变低的 18 题净 −6，**召回不变的 113 题净 −5**（换了检索器，即使召回水平一样，答案也会变，7 题由对变错）
-- 结论：**检索已经不是瓶颈了**。Dense 把"搜不到"从 106 题压到 83 题，但错误整体迁移到"读不对"（30 → 57）和答案形式。V1 报告里的判断（错误从"搜不到"变成"读不对"和"停不准"）在更强的检索器下更成立
+- ~~结论：检索已经不是瓶颈了~~ → **Day 9 更正**：说过头了。Dense 提高的是召回广度，但两段金标同时进前 3 的题不够多；加重排后 EM 从 0.300 涨到 0.405（4/4 显著）→ 瓶颈在前 3 条的精度。见"当前位置"的更正
 - 运行：`20261002-124659-qwen3b-static-rag-dense-validation`、`20261002-124808-qwen3b-agent-dense-validation`（commit `fbb162b` 之后，代码干净）；配置 `configs/qwen3b_{static_rag,agent}_dense.yaml`，脚本 `experiments/run_baselines_dense.sh`
 
 **Day 8.7 路由上限分析（2026-10-02）：结论是"换检索器"这条线的空间很小，而且换第二个数据集也救不回来；真正的空间在查询构造。** 两数据集同一套代码（`experiments/routing_ceiling.py`）：
@@ -85,18 +112,21 @@ V2 评测口径已定：贪心 + 3 个采样 seed，多数 seed 显著才算显�
 关机（非释放实例）后两个盘都在，代码、数据、索引、模型、记忆文件都还在；**只有 tmux 会话会消失**。
 
 ```bash
-# 1. 确认资产都在（应输出 5 行都存在）
+# 1. 确认资产都在（应输出 6 行都存在）
 ls -d /root/autodl-tmp/adaptive-agentic-search/data/hotpotqa/v1 \
       /root/autodl-tmp/adaptive-agentic-search/indexes/hotpot_pool_v1_bm25 \
       /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct \
       /root/autodl-tmp/adaptive-agentic-search/indexes/hotpot_pool_v1_e5 \
-      /root/autodl-tmp/hf_models/e5-base-v2
+      /root/autodl-tmp/hf_models/e5-base-v2 \
+      /root/autodl-tmp/hf_models/bge-reranker-base
 
-# 2. 重启检索服务（Day 3 跑实验前必须启动；Day 8 起带 --dense-index，三路检索都开，加载约 30s、内存约 3.5GB）
+# 2. 重启检索服务（Day 3 跑实验前必须启动；Day 8 起带 --dense-index，Day 9 起带 --reranker；加载约 30s、内存约 3.5GB、显存约 0.7GB）
+#    先起 vLLM 再起检索服务也可以，两者显存加起来约 21.5GB
 tmux new -d -s retriever "source /root/miniconda3/etc/profile.d/conda.sh && conda activate dsr1 \
   && cd /root/adaptive-agentic-search \
-  && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5 --port 8100"
-curl -s http://127.0.0.1:8100/health   # methods 里应有 bm25 / dense / hybrid，num_docs 都是 507494
+  && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5 \
+     --reranker /root/autodl-tmp/hf_models/bge-reranker-base --port 8100"
+curl -s http://127.0.0.1:8100/health   # methods 里应有 bm25 / dense / hybrid，num_docs 都是 507494；reranker 不为空
 
 # 3. 重启 vLLM 模型服务（Day 3 起，约 50s 就绪，显存占约 19GB）
 #    --guided-decoding-backend 必须加：vLLM 0.6.3 默认后端 outlines 缺依赖，每个请求都会 500
@@ -109,7 +139,7 @@ tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda act
 curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 131 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 135 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
@@ -130,7 +160,13 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - V1 Agent 查询重放（top_k=3）：BM25 0.677 → 0.795、Dense 0.765 → 0.828、Hybrid 0.760 → 0.830
   - 2Wiki analysis：Dense 0.588 → 0.651、Hybrid 0.602 → **0.657**（重排后 Hybrid 略强，+0.5 [+0.2, +0.9]，显著但很小）；组合题只到 0.546、桥接比较题 0.516 → **重排救不了"候选池里没有"**（组合题候选池@20 只有 0.573）
   - 耗时：每次重排 20 条候选，GPU 中位数 16ms（HotpotQA）/ 19ms（2Wiki），p95 23～29ms；输入长度中位数 135 token、p95 255
-- [ ] 9.4 端到端 B3 候选：Static RAG / Agent × Dense + 重排 / Hybrid + 重排（`experiments/run_b3_candidates.sh`）
+- [x] 9.4 端到端 B3 候选：Static RAG / Agent × Dense + 重排 / Hybrid + 重排，贪心 + 3 个 seed；结果见"当前位置"
+  - 检索服务带 `--reranker` 启动后显存 21.5GB（vLLM 约 19.5GB + 重排约 0.7GB + CUDA 上下文），单并发串行，没有显存竞争
+  - 服务里重排首次调用 370ms（冷启动），热身后约 22ms；端到端检索耗时 p50：Dense 65ms、Dense + 重排 81ms、Hybrid + 重排 101ms
+  - 第一次跑四组时，第 1 组跑完后我改了 PROGRESS.md，runner 拒绝了后 3 组 → 提交后在 `2d14968` 上四组全部重跑，残缺的那组挪到 `/root/autodl-tmp/aborted_runs/`（Day 6 踩过同一个坑：**批量运行期间不改仓库文件**）
+- [x] 9.5 Static RAG 错因四分法（贪心）：BM25 / Dense / Dense + 重排 / Hybrid + 重排的"齐+对"26 / 38 / **66** / 64，"齐+错"30 / 57 / 71 / 74，"缺+错"106 / 83 / **48** / 48；第 1 条就是金标 147 / 167 / 182 / 184 题
+  - 两种都证据全齐的 93 题：Dense EM 36 → Dense + 重排 39；3 条段落完全相同、只差顺序的 28 题：13 → 16 → 顺序本身有一点影响，但重排的收益主要来自把第二段金标挤进前 3
+  - 按题型 EM（BM25 / Dense / Dense + 重排）：桥接 0.289 / 0.270 / **0.403**，比较 0.439 / 0.415 / 0.415 → 收益全在桥接题
 
 ## Day 8 子步骤
 
@@ -307,6 +343,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2Wiki 语料池 + 分析集（175MB） | `data/2wiki/v1/` | `python -m data_prep.prepare_2wiki` |
 | 2Wiki BM25 索引（293MB） | `indexes/2wiki_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/2wiki/v1/corpus.jsonl --index indexes/2wiki_pool_v1_bm25` |
 | 2Wiki Dense 索引（1.3GB） | `indexes/2wiki_pool_v1_e5/` | `python -m retrieval.dense build --corpus data/2wiki/v1/corpus.jsonl --index indexes/2wiki_pool_v1_e5 --model /root/autodl-tmp/hf_models/e5-base-v2` |
+| bge-reranker-base（1.1GB） | `/root/autodl-tmp/hf_models/bge-reranker-base/` | hf-mirror `BAAI/bge-reranker-base` + aria2c，只下 safetensors 和分词器文件（sha256 `ced967c4…`，和 HF 一致） |
 | e5-base-v2（438MB） | `/root/autodl-tmp/hf_models/e5-base-v2/` | ModelScope `intfloat/e5-base-v2` + aria2c，只下 PyTorch 推理要的文件（sha256 `d0d559c4…`，和 HF 一致） |
 | Dense 索引（1.8GB） | `indexes/hotpot_pool_v1_e5/` | `python -m retrieval.dense build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_e5 --model /root/autodl-tmp/hf_models/e5-base-v2`（GPU，约 4 分钟；vLLM 占着显存时先停） |
 | 语料池 + 划分 + 清单（270MB） | `data/hotpotqa/v1/` | `python -m data_prep.prepare_hotpot` |
@@ -419,6 +456,8 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-02 | 重排模型用 bge-reranker-base，放 GPU fp16，候选池 20 → 输出 top_k | CPU 上一次 0.9s，太慢；GPU 上 18ms、约 0.7GB 显存，和 vLLM（约 19.5GB）共存没问题；Agent 单并发串行，重排和生成不会同时抢 GPU。候选池 20 沿用计划起步值 |
 | 2026-10-02 | 重排输入 = （查询, `标题\n正文`），超长只截段落（`truncation="only_second"`）；同分按 doc_id | 和 BM25 / 向量检索一样带标题；查询要完整保留；fp16 下几乎重复的段落可能同分，要固定顺序 |
 | 2026-10-02 | `rerank` 是 `/search` 上和 `method` 独立的开关；没加载重排模型时 `rerank=true` 返回 400 | V2 策略里"选检索器"和"要不要重排"是两个独立动作；不悄悄跳过重排，否则对比失真 |
+| 2026-10-02 | HotpotQA 的 B3 = **Static RAG + Dense + 重排**（只搜一次），不是计划里的 Always Hybrid + Rerank，也不是多轮 | Dense + 重排 EM 不比 Hybrid + 重排差（0/4 显著）、F1 更好（3/4 显著）、少跑一路 BM25；Agent 版 EM 0/4 显著、成本 4～5 倍。强基线取实测最强的、最便宜的那个 |
+| 2026-10-02 | V2 主线从"自适应选检索器 / 重排"调整为"**按需升级**：默认 B3，需要时升级成多轮" | 选检索器上限 3～5 点、重排已经默认要做（16ms 换 +10 EM）；能省的成本在"多轮 vs 单次"上（4～5 倍），而逐题取较好的上限有 +8～+13 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -429,6 +468,11 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - `eval/src/`：上次写的 base / rag / agent 评测和 GRPO 代码。
 
 ## 待办 / 开放问题
+
+- **按需升级的信号（Day 11～12 主线）**：B3 先作答 → 判断要不要升级成多轮。候选信号：① 作答步答案一致性（vLLM `n=K` 采样或 logprobs，Day 6 已证明一致性是准的置信度信号）；② 证据侧信号（重排分数的绝对值 / 第 1 和第 3 名的分差、问题里的实体是否都在前 3 条里出现）。Agent 稳定赢的 16 题里 10 题 B3 已证据全齐 → 只看证据侧会漏掉一大半，要和答案侧信号组合
+- 升级时 Agent 从哪里开始：从零开始（现在的 Agent）还是带着 B3 的检索结果接着搜（"原问题保底召回"的变体，见下）。后者更省、也避免"Agent 改写的查询不如原问题"
+- 2Wiki 的 B3 端到端：离线 Hybrid + 重排比 Dense + 重排高 0.5 个点（显著但很小），端到端跑 Static RAG 两种都试；2Wiki 的组合题候选池@20 只有 0.57，重排救不了，要靠拆解
+- Agent + Dense + 重排的证据召回（0.807）低于 B3（0.823）：Agent 第一次查询是改写过的，比原问题差（Day 3 现象在强检索下仍在）→ Day 10 的"原问题 vs 改写"对照要在 Dense + 重排上重做
 
 - **B3 强固定基线的定义（Day 9）**：HotpotQA 上 Dense 最强、2Wiki 上 Hybrid 最强 → 每个数据集都同时跑 Always Dense + Rerank 和 Always Hybrid + Rerank，取实测更强者，并在表里注明是怎么挑的。强基线不能刻意做弱
 - **"选检索器"降级为一个小消融**，不作为主线卖点：路由上限只有 3～5 个点、真实路由器更少，如实报告。主线的成本论证改成"重排 / 改写要不要做"和"何时停"

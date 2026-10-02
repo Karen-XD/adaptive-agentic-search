@@ -371,6 +371,12 @@ B4 的初始启发式可以是短实体/型号词 → BM25、较长语义表达 
 
 **2026-10-02 对第 2 条的修正**：Day 8 量出"最强的一路（含要不要混合）依数据集而变"——HotpotQA 上 Dense 最强，2Wiki 上 Hybrid 显著更强。所以 B3 不能写死成 `Always Hybrid + Rerank`：**每个数据集都同时跑 `Always Dense + Rerank` 和 `Always Hybrid + Rerank`，取实测更强者为 B3，并在结果表里注明挑选依据**。强基线不能刻意做弱。
 
+**2026-10-02 Day 9 实际结果（以这里为准）**：
+- 重排模型 bge-reranker-base（GPU fp16，20 条候选约 16～22ms，显存约 0.7GB）。离线召回@3：HotpotQA Dense 0.710 → 0.823、Hybrid 0.688 → 0.828，重排后两路差距抹平；2Wiki 组合题受候选池限制（池@20 只有 0.57）。
+- **HotpotQA 的 B3 = Static RAG + Dense + 重排（只搜一次）**：EM 0.405（3 个 seed 0.395～0.430），比 V1 Static RAG 高 7.5～9.5，4/4 显著；Hybrid + 重排不比它强（F1 3/4 显著更差）。
+- **在这个强检索下，多轮 Agent 不比单次强**：Agent + Dense + 重排 − B3 的 EM 0/4 显著，成本是 3.9 倍输入 token、5 倍延迟。
+- **V2 主线调整为"按需升级"（级联）**：默认走 B3，只在信号表明需要时升级为多轮。逐题取较好的上限 +8（稳定口径）～+13（单次口径）。Day 11 的 Policy 接口里，"升级 / 不升级"是核心动作；Day 12 主实验的 Ours 要和 B3 在"相同质量比成本 / 相同成本比质量"两个方向上比。2Wiki 的 B3 待端到端确认。
+
 ## Day 10｜Query Reformulation：把已有 Rewrite 经历用在新问题上
 
 做三组公平对照：

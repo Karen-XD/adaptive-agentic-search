@@ -153,11 +153,18 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 而查询构造的影响大得多：2Wiki 上把整句问题换成"实体 + 关系"的子查询，召回从 0.59 升到 0.97。
 → **V2 主线调整**：选检索器降为小消融；重点放在查询改写 / 问题拆解（Day 10）和"要不要重排、何时停"的成本权衡上；2Wiki 作为第二个分析集，专门测拆解和跨数据集稳健性。
 
+### Day 9：精排 + 强基线（✅ 2026-10-02）
+
+加了 Cross-Encoder 重排（bge-reranker-base，20 条候选、GPU 约 16～22ms）。检索服务的 `/search` 多一个 `rerank` 开关，和选检索器互相独立。
+- 重排让前 3 条召回涨 11～17 个点，并且**抹平了检索器之间的差距**（重排后 Dense ≈ Hybrid）。
+- HotpotQA 的 **B3 强基线 = Static RAG + Dense + 重排（只搜一次）**：EM 0.405，比 V1 的 Static RAG 高 8～9 个点，4 个解码设定都显著。
+- **关键发现**：在这个强检索下，多轮 Agent 不比单次强（4 个设定都不显著），成本 4～5 倍。
+- 在全局里的意义：**V2 主线改成"按需升级"（级联）**——默认走便宜的 B3，只在不确定时升级成多轮。两者逐题取较好的上限比 B3 高 8～13 个点。
+
 ### 接下来（V2）
 
-- **Day 8 收尾**：换检索器重跑 Static RAG / Agent，看召回优势能不能变成准确率
-- **Day 9**：重排 + 最强固定基线（总是混合检索 + 重排）
-- **Day 10～12**：查询改写、统一策略接口、自适应策略主实验（信号：新文档数、答案一致性、证据覆盖）
+- **Day 10**：查询改写三组对照，在 Dense + 重排上做；2Wiki 组合题测问题拆解
+- **Day 11～12**：统一策略接口 + 按需升级的主实验（信号：答案一致性 × 证据信号），和 B3 比质量–成本
 - **Day 13～14**：商品搜索后端，Stop Point 2
 
 ## 6. 现在怎么运行
@@ -166,7 +173,7 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 conda activate dsr1
 cd /root/adaptive-agentic-search
 
-pytest tests/                                                # 131 个测试
+pytest tests/                                                # 135 个测试
 
 # 一次性准备（数据和索引不进 git，实例释放后要重建）
 python -m data_prep.prepare_hotpot                           # 语料池 + 题目划分 + 数据清单
@@ -176,7 +183,8 @@ python -m retrieval.dense build --corpus data/hotpotqa/v1/corpus.jsonl --index i
     --model /root/autodl-tmp/hf_models/e5-base-v2              # 向量索引（GPU，约 4 分钟）
 
 # 启动检索服务（放 tmux 里常驻）；三路检索都开，配置里 retrieval.method 选 bm25 / dense / hybrid
-python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5 --port 8100
+python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5 \
+    --reranker /root/autodl-tmp/hf_models/bge-reranker-base --port 8100   # 配置里 retrieval.rerank: true 开重排
 
 # 启动模型服务（verl_env 环境，放 tmux 里常驻；完整参数见 docs/PROGRESS.md 恢复清单）
 python -m vllm.entrypoints.openai.api_server --model /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct --port 8000 ...
@@ -192,6 +200,10 @@ python -m evaluation.run_eval --config configs/qwen3b_oracle.yaml --split valida
 bash experiments/run_baselines.sh validation                                                # 四种方法依次跑完
 python -m experiments.day3_query_rewrite_analysis outputs/runs/<agent 运行>                 # 查询改写得失
 python -m experiments.day8_retriever_compare --split validation --agent-run outputs/runs/<agent 运行>  # 三路检索对比
+python -m experiments.day9_rerank_compare --data data/hotpotqa/v1 --split validation \
+    --bm25-index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5             # 重排离线对比
+bash experiments/run_b3_candidates.sh validation                                             # B3 候选端到端
+bash experiments/run_seeds_b3.sh validation                                                  # B3 候选 3 个 seed
 python -m data_prep.prepare_2wiki                                                            # 2Wiki 语料池 + 分析集
 python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
     --bm25-index indexes/2wiki_pool_v1_bm25 --dense-index indexes/2wiki_pool_v1_e5             # 路由上限（HotpotQA 同理）
@@ -212,13 +224,13 @@ python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
 | 目录 | 放什么 | 现状 |
 |---|---|---|
 | `agent/` | 数据结构、解析器、循环、提示词、模型接口、四种方法（`methods.py`） | Day 1 完成；Day 3 接入 vLLM 客户端、原生工具提示词、基线方法 |
-| `retrieval/` | 检索工具：假检索、BM25、向量检索（`dense.py`）、RRF 混合（`hybrid.py`）、检索服务和客户端 | Day 2 BM25；Day 8 向量 + 混合；Day 9 加重排 |
+| `retrieval/` | 检索工具：假检索、BM25、向量检索（`dense.py`）、RRF 混合（`hybrid.py`）、重排（`rerank.py`）、检索服务和客户端 | Day 2 BM25；Day 8 向量 + 混合；Day 9 重排 |
 | `evaluation/` | 评测指标（EM、F1、证据召回、成本）、实验入口、Oracle 金标读取 | Day 3 补齐基线所需指标 |
 | `experiments/` | 一次性分析脚本：提示词格式对比、查询改写分析、错题分类（`day5_error_taxonomy.py`，`--show qid` 重放单题） | 随各 Day 增加 |
 | `configs/` | 实验配置 | `qwen3b_base.yaml` + 四个继承它的方法配置（划分由 `--split` 指定）；`mock_v1.yaml`、`bm25_debug.yaml` |
 | `data_prep/` | 数据准备、数据体检 | HotpotQA 完成 |
 | `data/`、`indexes/` | 数据和索引（不进 git） | HotpotQA、2Wiki 两个语料池，各有 BM25 和 e5 向量索引 |
-| `tests/` | 自动测试 | 131 个 |
+| `tests/` | 自动测试 | 135 个 |
 | `third_party/Search-R1/` | 上游源码，只读参考 | 锁定在 `598e61b` |
 
 ## 8. 面试一分钟版（随进度更新）
@@ -239,4 +251,6 @@ python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
 >
 > V2 第一步我加了向量检索和混合检索。一个反直觉的发现是：向量检索只搜一次，召回就超过了 BM25 Agent 搜多轮；而 BM25 和向量做等权融合反而不如单独用向量。原因是两者擅长的不一样，BM25 匹配"提到"，向量匹配"关于"，而在这个数据集上后者更重要。所以强基线不能想当然地定成"混合检索"，要用数据挑。
 >
-> （Day 14 后补：自适应策略省了多少成本。）
+> 接着加了重排。重排一次只要十几毫秒，单次检索的准确率就从 30% 涨到 40.5%，4 个解码设定都显著，还把检索器之间的差距抹平了。更关键的是，在这个强检索下，多轮 Agent 已经不比只搜一次强了，成本却是 4 到 5 倍。所以我把 V2 的问题改成了"什么时候值得从单次升级成多轮"，也就是推荐里的级联：大部分题走便宜的强基线，只把不确定的题升级。两者逐题取较好的上限比强基线高 8 到 13 个点，这就是要去拿的空间。
+>
+> （Day 14 后补：按需升级省了多少成本、拿到了多少上限。）
