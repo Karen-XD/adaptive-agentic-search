@@ -6,9 +6,11 @@
 | direct（B0） | 无 | 不能 | final_answer | 0 |
 | static_rag（B1） | 原问题检索 top_k 条 | 不能 | final_answer | 1（流程替模型用掉） |
 | oracle（诊断上限） | 金标段落 | 不能 | final_answer | 0（不算检索成本） |
+| rewrite_rag / two_hop_static / two_hop_evidence（Day 10） | 按固定计划检索 1～2 次，查询由模型改写 | 不能 | final_answer | 1 / 2 / 2 |
 
 direct / static_rag / oracle 的提示词一字不差，只差用户消息里的证据 → 三者之差就是"证据"带来的差别：
 B0 → B1 是一次检索的收益，B1 → Oracle 是检索还差多少，Oracle → 100% 是阅读（和标签噪声）的损失。
+Day 10 的三种改写方法也用同一份作答提示词，只差证据来自哪些查询（检索计划见 agent/rewrite.py）。
 
 Oracle 要把金标段落放进提示词，是防泄漏规则的唯一例外（CLAUDE.md）：金标由评测侧读取后传进来，
 这里不碰答案文件；只许在 validation / debug 上跑，见 evaluation/oracle.py。
@@ -20,17 +22,18 @@ import time
 from agent.llm import LLM
 from agent.loop import SearchTool, run_episode
 from agent.prompts import ANSWER_ONLY_PROMPTS
+from agent.rewrite import PLANS, retrieve_with_plan
 from agent.schema import Budget, Context, Doc, ErrorCode, Observation, Trajectory
 
-METHODS = ("agent", "direct", "static_rag", "oracle")
-NEEDS_RETRIEVAL = {"agent", "static_rag"}
+METHODS = ("agent", "direct", "static_rag", "oracle", *PLANS)
+NEEDS_RETRIEVAL = {"agent", "static_rag", *PLANS}
 
 
 def check_budget(method: str, budget: Budget) -> None:
     """搜索次数写在配置里，和方法对不上就拒绝运行：成本统计按实际执行的检索算，配错了表就不可比。"""
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}, choose from {METHODS}")
-    expected = {"direct": 0, "static_rag": 1, "oracle": 0}.get(method)
+    expected = {"direct": 0, "static_rag": 1, "oracle": 0, **{m: len(p) for m, p in PLANS.items()}}.get(method)
     if expected is not None and budget.max_search_calls != expected:
         raise ValueError(f"{method} needs budget.max_search_calls={expected}, got {budget.max_search_calls}")
     if method == "agent" and budget.max_search_calls < 1:
@@ -60,6 +63,8 @@ def run_method(method: str, qid: str, question: str, llm: LLM, tool: SearchTool 
         return run_episode(qid, question, llm, None, budget, prompts=ANSWER_ONLY_PROMPTS, method=method)
     if method == "static_rag":
         context = retrieve_context(question, tool, budget.top_k)
+    elif method in PLANS:
+        context = retrieve_with_plan(method, question, tool, llm, budget.top_k)
     elif method == "oracle":
         if gold_docs is None:
             raise ValueError("oracle needs gold_docs")

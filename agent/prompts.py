@@ -37,6 +37,22 @@ ANSWER_ONLY_FORMAT_HINT = ('Use exactly one tool call per turn: '
                            '<tool_call>{"name": "final_answer", "arguments": {"answer": "..."}}</tool_call>')
 
 
+# 查询改写（Day 10）：只给 search 一个工具，模型只能写查询。改写和作答分开调用，作答仍用 ANSWER_ONLY_PROMPTS，
+# 这样各组只差"证据从哪些查询来"，作答提示词一字不差
+STATIC_REWRITE_TASK = ("Write one search query for a Wikipedia paragraph search engine. The query should retrieve "
+                       "the paragraph that contains the information needed to answer the question. "
+                       "Use the key names and terms in the question. Call search exactly once.")
+# 证据条件改写用 Agent 的对话格式：之前的检索写成模型自己发出的 search 调用，结果以工具返回（<tool_response>）给它。
+# debug 上试过把段落放进用户消息（render_rewrite_user 的 evidence 分支）：50 题 0 次用上证据里的新实体、0 次先写推理，
+# 几乎都在复述原问题；同一个模型在 Agent 循环里第二次搜索前 76% 会先写推理、35% 用上证据里的实体 → 顺着微调格式
+EVIDENCE_REWRITE_TASK = ("Answer the question by searching a document collection. Call exactly one function per turn. "
+                         "The information found so far is not enough: search again with different keywords "
+                         "for what is still missing.")
+STATIC_REWRITE_SYSTEM_PROMPT = native_system_prompt(STATIC_REWRITE_TASK, [SEARCH_TOOL])
+EVIDENCE_REWRITE_SYSTEM_PROMPT = native_system_prompt(EVIDENCE_REWRITE_TASK, [SEARCH_TOOL])
+REWRITE_FORMAT_HINT = 'Use exactly one tool call: <tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call>'
+
+
 @dataclass(frozen=True)
 class Prompts:
     system: str
@@ -61,3 +77,8 @@ def render_context(obs: Observation) -> str:
     """答题前给的证据，放在问题前面。段落格式和 Agent 看到的检索结果一致。"""
     docs = render_observation(obs) if obs.ok and obs.docs else "(none)"  # 检索失败也照常答题，只是没有证据
     return f"Documents:\n{docs}"
+
+
+def render_rewrite_user(question: str) -> str:
+    """静态改写的用户消息：只给问题。证据条件改写的上下文见 agent/rewrite.py（Agent 的对话格式）。"""
+    return f"Question: {question}"

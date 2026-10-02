@@ -1,0 +1,10 @@
+# Day 10 改写对照：检索计划见 agent/rewrite.py。检索栈和 B3 相同（Dense + 重排），作答提示词和 B3 一字不差。
+extends: qwen3b_base.yaml
+name: qwen3b-two-hop-static
+method: two_hop_static
+budget: {max_search_calls: 2}
+retrieval:
+  type: http
+  url: http://127.0.0.1:8100
+  method: dense
+  rerank: true

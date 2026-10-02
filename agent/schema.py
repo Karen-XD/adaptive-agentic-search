@@ -133,12 +133,30 @@ class Step(BaseModel):
     budget_state: BudgetState                # 本轮结束后的用量快照
 
 
+class SearchRecord(BaseModel):
+    """固定流程里的一次检索（Day 10 改写对照）：用什么查询、查询怎么来的、搜到了什么、花了多少。"""
+    kind: Literal["original", "static_rewrite", "evidence_rewrite"]
+    query: str
+    generated: Optional[str] = None   # 改写那次模型的原始输出；原问题检索为空
+    fallback: bool = False            # 改写没解析出合法的 search 调用，退回用原问题检索
+    observation: Observation          # 这次检索的原始结果（名次是这次检索里的名次）
+    num_new_docs: int = 0             # 之前几次检索没见过的段落数
+    llm_latency_ms: float = 0.0
+    tool_latency_ms: float = 0.0
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+
+
 class Context(BaseModel):
-    """答题前就放进提示词的证据（Static RAG / Oracle），不是模型自己搜来的。"""
+    """答题前就放进提示词的证据（Static RAG / Oracle / 改写流程），不是模型在作答循环里自己搜来的。"""
     source: Literal["retrieval", "oracle"]
     query: Optional[str] = None  # Static RAG 拿原问题检索；Oracle 没有查询，也不算检索成本
-    observation: Observation
-    latency_ms: float = 0.0
+    observation: Observation     # 模型看到的证据；多次检索时是去重合并后的结果，名次按展示顺序重排
+    latency_ms: float = 0.0      # 含改写的模型调用
+    searches: list[SearchRecord] = Field(default_factory=list)  # 多次检索 / 改写的明细；Static RAG 为空
+
+    def num_searches(self) -> int:
+        return len(self.searches) if self.searches else int(self.query is not None)
 
 
 class Trajectory(BaseModel):

@@ -76,9 +76,20 @@ def aggregate(records: list[dict]) -> dict:
                            for k in ("unclosed_calls", "ignored_suffixes", "repaired_quotes")},
         "mean_new_docs_per_call": sum(r["new_docs"] for r in records) / total_calls if total_calls else 0.0,
         "stop_reasons": dict(Counter(r["stop_reason"] for r in records)),
+        **_rewrite_metrics(records),
         **_evidence_metrics(records),
         **_cost_metrics(records),
     }
+
+
+def _rewrite_metrics(records: list[dict]) -> dict:
+    """Day 10 改写流程：改写调了几次、几次没解析出查询（退回原问题）、几次和之前的查询重复（白搜一次）。"""
+    calls = sum(r.get("rewrite_calls", 0) for r in records)
+    if not calls:
+        return {}
+    return {"mean_rewrite_calls": calls / len(records),
+            "rewrite_fallback_rate": sum(r["rewrite_fallbacks"] for r in records) / calls,
+            "rewrite_repeat_rate": sum(r["rewrite_repeats"] for r in records) / calls}
 
 
 def _cost_metrics(records: list[dict]) -> dict:

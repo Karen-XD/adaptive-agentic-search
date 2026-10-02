@@ -46,11 +46,12 @@ def run_episode(qid: str, question: str, llm: LLM, tool: SearchTool | None, budg
     seen_doc_ids: set[str] = set()
     if context is not None:
         seen_doc_ids |= {d.doc_id for d in context.observation.docs}
-        if context.query is not None:
-            # Static RAG：流程替模型拿原问题搜了一次。成本照算，和 Agent 的搜索次数放在同一把尺子上
-            state.search_attempts += 1
-            state.search_calls_used += 1
-            searched[normalize_query(context.query)] = 0
+        # Static RAG / 改写流程：流程替模型搜过了。成本照算，和 Agent 的搜索次数放在同一把尺子上
+        state.search_attempts += context.num_searches()
+        state.search_calls_used += context.num_searches()
+        for q in [context.query] * (not context.searches) + [r.query for r in context.searches]:
+            if q is not None:
+                searched.setdefault(normalize_query(q), 0)
     budget_hit = False  # 搜索次数用完后模型仍想搜：之后只许作答
     notified = False    # 是否已经告诉过模型"只许作答"
     answer, stop_reason, error = None, StopReason.NO_ANSWER, None
