@@ -1,0 +1,5 @@
+# 对照：只搜一次原问题但取前 6 条，和两跳的组看到的段落数相同
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-static-rag-top6
+method: static_rag
+budget: {max_search_calls: 1, top_k: 6}

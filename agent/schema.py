@@ -135,9 +135,9 @@ class Step(BaseModel):
 
 class SearchRecord(BaseModel):
     """固定流程里的一次检索（Day 10 改写对照）：用什么查询、查询怎么来的、搜到了什么、花了多少。"""
-    kind: Literal["original", "static_rewrite", "evidence_rewrite"]
+    kind: Literal["original", "static_rewrite", "evidence_rewrite", "decompose"]
     query: str
-    generated: Optional[str] = None   # 改写那次模型的原始输出；原问题检索为空
+    generated: Optional[str] = None   # 改写那次模型的原始输出；原问题检索为空。拆解一次调用出多个查询，只记在第一个上
     fallback: bool = False            # 改写没解析出合法的 search 调用，退回用原问题检索
     observation: Observation          # 这次检索的原始结果（名次是这次检索里的名次）
     num_new_docs: int = 0             # 之前几次检索没见过的段落数

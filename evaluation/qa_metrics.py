@@ -83,13 +83,15 @@ def aggregate(records: list[dict]) -> dict:
 
 
 def _rewrite_metrics(records: list[dict]) -> dict:
-    """Day 10 改写流程：改写调了几次、几次没解析出查询（退回原问题）、几次和之前的查询重复（白搜一次）。"""
+    """Day 10 改写流程：改写调了几次模型；改写出来的检索里，几次没拿到查询（退回原问题）、几次和之前的查询重复（白搜一次）。
+    分母是"本该由改写给出查询的检索次数"：改写 / 证据改写一次调用对应一次检索，拆解一次调用对应两次。"""
     calls = sum(r.get("rewrite_calls", 0) for r in records)
+    searches = sum(r.get("rewritten_searches", 0) for r in records)
     if not calls:
         return {}
     return {"mean_rewrite_calls": calls / len(records),
-            "rewrite_fallback_rate": sum(r["rewrite_fallbacks"] for r in records) / calls,
-            "rewrite_repeat_rate": sum(r["rewrite_repeats"] for r in records) / calls}
+            "rewrite_fallback_rate": sum(r["rewrite_fallbacks"] for r in records) / searches,
+            "rewrite_repeat_rate": sum(r["rewrite_repeats"] for r in records) / searches}
 
 
 def _cost_metrics(records: list[dict]) -> dict:

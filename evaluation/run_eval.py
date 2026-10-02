@@ -20,7 +20,8 @@ import yaml
 
 from agent.llm import RetryingLLM, SearchThenTitleLLM, VLLMClient
 from agent.methods import NEEDS_RETRIEVAL, check_budget, run_method
-from agent.prompts import AGENT_PROMPTS, ANSWER_ONLY_PROMPTS, EVIDENCE_REWRITE_SYSTEM_PROMPT, STATIC_REWRITE_SYSTEM_PROMPT
+from agent.prompts import (AGENT_PROMPTS, ANSWER_ONLY_PROMPTS, DECOMPOSE_SYSTEM_PROMPT, EVIDENCE_REWRITE_SYSTEM_PROMPT,
+                           STATIC_REWRITE_SYSTEM_PROMPT)
 from agent.rewrite import PLANS, is_repeat
 from agent.schema import Budget, ErrorCode, StopReason
 from evaluation.oracle import ALLOWED_SPLITS as ORACLE_SPLITS, load_gold_docs
@@ -170,7 +171,8 @@ def main() -> None:
         # 模型看到的原文；改提示词不用翻 git 就能对比两次运行
         "system_prompt": (AGENT_PROMPTS if method == "agent" else ANSWER_ONLY_PROMPTS).system,
         "rewrite_prompts": {k: v for k, v in (("static_rewrite", STATIC_REWRITE_SYSTEM_PROMPT),
-                                              ("evidence_rewrite", EVIDENCE_REWRITE_SYSTEM_PROMPT))
+                                              ("evidence_rewrite", EVIDENCE_REWRITE_SYSTEM_PROMPT),
+                                              ("decompose", DECOMPOSE_SYSTEM_PROMPT))
                             if k in PLANS.get(method, ())},
         "env": {"python": platform.python_version(), "platform": platform.platform(),
                 **{pkg: version(pkg) for pkg in ("pydantic", "pyyaml", "bm25s", "openai", "transformers")}},
@@ -202,8 +204,11 @@ def main() -> None:
             if traj.context is not None:
                 retrieved |= {d.doc_id for d in traj.context.observation.docs}
             gold_ids = set(label.get("gold_doc_ids", []))
-            # 成本：假模型没有 token 数（None），这时整题记 None 而不是 0。改写那几次模型调用也算进去
-            rewrites = [r for r in traj.context.searches if r.kind != "original"] if traj.context is not None else []
+            # 成本：假模型没有 token 数（None），这时整题记 None 而不是 0。改写 / 拆解那几次模型调用也算进去
+            # （拆解一次调用出两个查询，只有第一条记录带 generated，按它数调用次数）
+            searches = traj.context.searches if traj.context is not None else []
+            rewritten = [(i, r) for i, r in enumerate(searches) if r.kind != "original"]
+            rewrites = [r for r in searches if r.generated is not None]
             prompt_tokens = [s.prompt_tokens for s in traj.steps] + [r.prompt_tokens for r in rewrites]
             completion_tokens = [s.completion_tokens for s in traj.steps] + [r.completion_tokens for r in rewrites]
             has_tokens = None not in prompt_tokens and None not in completion_tokens
@@ -227,10 +232,9 @@ def main() -> None:
                 "latency_ms": context_ms + sum(s.llm_latency_ms + s.tool_latency_ms for s in traj.steps),
                 "llm_call_ms": [s.llm_latency_ms for s in traj.steps] + [r.llm_latency_ms for r in rewrites],
                 "rewrite_calls": len(rewrites),
-                "rewrite_fallbacks": sum(r.fallback for r in rewrites),
-                "rewrite_repeats": sum(is_repeat(r, traj.context.searches[:i])
-                                       for i, r in enumerate(traj.context.searches) if r.kind != "original")
-                if traj.context is not None else 0,
+                "rewritten_searches": len(rewritten),
+                "rewrite_fallbacks": sum(r.fallback for _, r in rewritten),
+                "rewrite_repeats": sum(is_repeat(r, searches[:i]) for i, r in rewritten),
             })
             f.write(json.dumps({**traj.model_dump(mode="json"),
                                 "eval": {"gold": label["answer"], "em": correct, "f1": f1,

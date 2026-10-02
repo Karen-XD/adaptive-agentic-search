@@ -7,8 +7,10 @@ import os
 
 import pytest
 
-from agent.native_tools import FINAL_ANSWER_TOOL, native_system_prompt
-from agent.prompts import ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_TASK, SYSTEM_PROMPT, TASK, TOOLS
+from agent.native_tools import DECOMPOSE_TOOL, FINAL_ANSWER_TOOL, SEARCH_TOOL, native_system_prompt
+from agent.prompts import (ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_TASK, DECOMPOSE_SYSTEM_PROMPT, DECOMPOSE_TASK,
+                           EVIDENCE_REWRITE_SYSTEM_PROMPT, EVIDENCE_REWRITE_TASK, STATIC_REWRITE_SYSTEM_PROMPT,
+                           STATIC_REWRITE_TASK, SYSTEM_PROMPT, TASK, TOOLS)
 
 MODEL_DIR = os.environ.get("MODEL_DIR", "/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct")
 
@@ -26,7 +28,10 @@ def _from_chat_template(task: str, tools: list[dict]) -> str:
 @pytest.mark.parametrize("prompt, task, tools", [
     (SYSTEM_PROMPT, TASK, TOOLS),
     (ANSWER_ONLY_SYSTEM_PROMPT, ANSWER_ONLY_TASK, [FINAL_ANSWER_TOOL]),  # B0 / B1 / Oracle：同一种写法，少了 search
-], ids=["agent", "answer_only"])
+    (STATIC_REWRITE_SYSTEM_PROMPT, STATIC_REWRITE_TASK, [SEARCH_TOOL]),    # Day 10 改写
+    (EVIDENCE_REWRITE_SYSTEM_PROMPT, EVIDENCE_REWRITE_TASK, [SEARCH_TOOL]),
+    (DECOMPOSE_SYSTEM_PROMPT, DECOMPOSE_TASK, [DECOMPOSE_TOOL]),           # Day 10.4 拆解：参数是列表
+], ids=["agent", "answer_only", "static_rewrite", "evidence_rewrite", "decompose"])
 def test_matches_chat_template(prompt, task, tools):
     assert prompt == _from_chat_template(task, tools)
 

@@ -1,0 +1,6 @@
+# 2Wiki 的 B3 候选：Static RAG + hybrid 取 20 条候选 → 重排 → 前 3 条
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-static-rag-hybrid-rerank
+method: static_rag
+budget: {max_search_calls: 1}
+retrieval: {method: hybrid}

@@ -1,0 +1,5 @@
+# 2Wiki 上的改写 / 拆解对照：检索计划见 agent/rewrite.py，检索栈见 qwen3b_2wiki_base.yaml
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-two-hop-evidence
+method: two_hop_evidence
+budget: {max_search_calls: 2}

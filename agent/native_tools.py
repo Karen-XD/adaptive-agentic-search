@@ -28,6 +28,18 @@ FINAL_ANSWER_TOOL = {"type": "function", "function": {
                    "required": ["answer"]}}}
 
 
+# 静态拆解（Day 10.4）：一次写出多个子查询。参数是列表，所以单独做一个工具，而不是让模型一轮写多个 search：
+# 生成在第一个 </tool_call> 处就停（每轮一个动作），一轮写不出多个调用
+DECOMPOSE_TOOL = {"type": "function", "function": {
+    "name": "decompose",
+    "description": "Split the question into simpler sub-questions and search for each of them. "
+                   "Returns the top matching passages for every sub-question.",
+    "parameters": {"type": "object",
+                   "properties": {"subqueries": {"type": "array", "items": {"type": "string"},
+                                                 "description": "One search query per sub-question"}},
+                   "required": ["subqueries"]}}}
+
+
 def native_system_prompt(task: str, tools: list[dict]) -> str:
     """复现 Qwen2.5 对话模板在传入 tools 时生成的 system 内容（模板里 tojson = json.dumps(ensure_ascii=False)）。"""
     signatures = "".join("\n" + json.dumps(t, ensure_ascii=False) for t in tools)

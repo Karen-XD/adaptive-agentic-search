@@ -1,9 +1,12 @@
 """从 2WikiMultihopQA 原始数据构造：语料池 + 分析集 + 数据清单。和 prepare_hotpot 同一套规则，两个数据集的检索结果才能直接比。
 
 语料池 = train 与官方 dev 全部题目自带的上下文段落（每题 10 段），按标题去重；同一标题多个版本留出现最多的。
-目前只做 analysis 划分：从 train 按题型分层抽样（每类同样多），用于离线检索分析。
+划分都从 train 按题型分层抽样（每类同样多），三者互不重叠：
+  analysis    每类 500，离线检索分析（Day 8～9）
+  validation  每类 200，端到端对比（Day 10.4 起）；提示词不在这里调
+  debug       每类 25，调提示词、看输出
 2Wiki 的 inference 题在 train 里只占 2.6%，按自然分布抽几乎抽不到；分层后按题型报告，不报一个混合平均。
-以后如果把 2Wiki 作为正式评测集，validation / test 要另抽，并且和 analysis 不重叠。
+官方 dev 留作以后的 test，现在不碰。抽样顺序固定（先 analysis，再 validation、debug），加新划分不改变已有划分。
 标签里额外保存 evidences（实体, 关系, 值）三元组：只给评测侧分析用（构造理想子查询），不进 prompt。
 
 用法：python -m data_prep.prepare_2wiki
@@ -61,6 +64,8 @@ def main() -> None:
     ap.add_argument("--raw", default="data/raw/2wiki")
     ap.add_argument("--out", default="data/2wiki/v1")
     ap.add_argument("--n_per_type", type=int, default=500)
+    ap.add_argument("--n_validation_per_type", type=int, default=200)
+    ap.add_argument("--n_debug_per_type", type=int, default=25)
     ap.add_argument("--seed", type=int, default=20261002)
     args = ap.parse_args()
     raw, out = ROOT / args.raw, ROOT / args.out
@@ -73,14 +78,30 @@ def main() -> None:
     picked = []
     for t in sorted(train.type.unique()):
         picked += rng.sample(sorted(train.loc[train.type == t, "_id"]), args.n_per_type)
-    sub = train.set_index("_id").loc[picked].reset_index()
-    questions, labels = to_split(sub)
+    # 后加的划分：从 analysis 没抽到的题里抽，用独立的随机数生成器，不影响 analysis 的抽样结果
+    rest = train[~train["_id"].isin(set(picked))]
+    rng2 = random.Random(args.seed + 1)
+    extra = {"validation": [], "debug": []}
+    for t in sorted(train.type.unique()):
+        ids = rng2.sample(sorted(rest.loc[rest.type == t, "_id"]), args.n_validation_per_type + args.n_debug_per_type)
+        extra["validation"] += ids[:args.n_validation_per_type]
+        extra["debug"] += ids[args.n_validation_per_type:]
     known = {d["doc_id"] for d in corpus}
-    missing = sum(g not in known for l in labels for g in l["gold_doc_ids"])
-    if missing:
-        raise SystemExit(f"{missing} gold doc ids not in corpus")
-    write_jsonl(out / "questions" / "analysis.jsonl", questions)
-    write_jsonl(out / "labels" / "analysis.jsonl", labels)
+    by_id = train.set_index("_id")
+    stats = {}
+    for name, ids in (("analysis", picked), *extra.items()):
+        questions, labels = to_split(by_id.loc[ids].reset_index())
+        missing = sum(g not in known for l in labels for g in l["gold_doc_ids"])
+        if missing:
+            raise SystemExit(f"{name}: {missing} gold doc ids not in corpus")
+        write_jsonl(out / "questions" / f"{name}.jsonl", questions)
+        write_jsonl(out / "labels" / f"{name}.jsonl", labels)
+        stats[name] = {"num_questions": len(labels), "source": "train", "sampling": "stratified by type",
+                       "type": dict(Counter(l["type"] for l in labels)),
+                       "num_gold": dict(Counter(len(l["gold_doc_ids"]) for l in labels))}
+    split_ids = {name: set(ids) for name, ids in (("analysis", picked), *extra.items())}
+    assert not (split_ids["analysis"] & split_ids["validation"] or split_ids["analysis"] & split_ids["debug"]
+                or split_ids["validation"] & split_ids["debug"]), "splits overlap"
 
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     manifest = {
@@ -90,9 +111,7 @@ def main() -> None:
                    "files": {f: sha256(raw / f) for f in RAW_FILES.values()}},
         "corpus": {"num_docs": len(corpus), "dedup": "by title, keep most frequent version",
                    "built_from": f"all context paragraphs of train ({len(train)}) + dev ({len(dev)})"},
-        "splits": {"analysis": {"num_questions": len(labels), "source": "train", "sampling": "stratified by type",
-                                "type": dict(Counter(l["type"] for l in labels)),
-                                "num_gold": dict(Counter(len(l["gold_doc_ids"]) for l in labels))}},
+        "splits": stats,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(manifest, indent=2, ensure_ascii=False))

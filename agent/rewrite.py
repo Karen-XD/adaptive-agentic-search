@@ -6,6 +6,7 @@
 | rewrite_rag | 静态改写 | 只有问题 |
 | two_hop_static | 原问题 → 静态改写 | 只有问题 |
 | two_hop_evidence | 原问题 → 证据条件改写 | 问题 + 第一次检索（以"自己搜过、收到工具返回"的格式） |
+| two_hop_decompose（Day 10.4） | 子查询 1 → 子查询 2（一次调用拆出来） | 只有问题 |
 
 为什么用固定流程、不让模型自己决定搜几次：Day 10 只比"查询写得好不好"。Agent 循环里查询、停止、作答缠在一起，
 改了查询停止行为也跟着变（Day 6 见过：改一处，77% 的轨迹都变了）。这里两跳的组每题都恰好搜 2 次，预算完全相同。
@@ -24,14 +25,15 @@ import time
 from agent.llm import LLM
 from agent.loop import SearchTool, normalize_query
 from agent.parser import parse_action
-from agent.prompts import (EVIDENCE_REWRITE_SYSTEM_PROMPT, REWRITE_FORMAT_HINT, STATIC_REWRITE_SYSTEM_PROMPT,
-                           render_observation, render_rewrite_user)
+from agent.prompts import (DECOMPOSE_SYSTEM_PROMPT, EVIDENCE_REWRITE_SYSTEM_PROMPT, REWRITE_FORMAT_HINT,
+                           STATIC_REWRITE_SYSTEM_PROMPT, render_observation, render_rewrite_user)
 from agent.schema import Context, ErrorCode, Observation, SearchAction, SearchRecord
 
 PLANS = {
     "rewrite_rag": ("static_rewrite",),
     "two_hop_static": ("original", "static_rewrite"),
     "two_hop_evidence": ("original", "evidence_rewrite"),
+    "two_hop_decompose": ("decompose", "decompose"),  # 一次拆解调用，依次搜前两个子查询
 }
 
 
@@ -84,14 +86,53 @@ def _rewrite(llm: LLM, kind: str, question: str, previous: list[SearchRecord]) -
     return (action.arguments.query if isinstance(action, SearchAction) else None), info
 
 
+def parse_subqueries(generated: str) -> list[str]:
+    """从 decompose 调用里取子查询，按归一化去重。解析不了返回空列表（由调用方退回原问题）。
+
+    不复用 agent/parser.py：那里的结构层只认 search / final_answer 两个单参数工具。这里只认 decompose，
+    规则和那边一致：取 <tool_call> 之后第一个完整的 JSON 对象，缺结尾标签也照样解析。
+    """
+    if "<tool_call>" not in generated:
+        return []
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(generated.split("<tool_call>", 1)[1].strip())
+        subqueries = obj["arguments"]["subqueries"] if obj.get("name") == "decompose" else []
+    except (json.JSONDecodeError, AttributeError, KeyError, TypeError):
+        return []
+    out, seen = [], set()
+    for q in subqueries if isinstance(subqueries, list) else []:
+        if isinstance(q, str) and q.strip() and len(q) <= 512 and normalize_query(q) not in seen:
+            seen.add(normalize_query(q))
+            out.append(q.strip())
+    return out
+
+
+def _decompose(llm: LLM, question: str) -> tuple[list[str], dict]:
+    t0 = time.perf_counter()
+    gen = llm.generate([{"role": "system", "content": DECOMPOSE_SYSTEM_PROMPT},
+                        {"role": "user", "content": render_rewrite_user(question)}])
+    info = {"generated": gen.text, "llm_latency_ms": (time.perf_counter() - t0) * 1000,
+            "prompt_tokens": gen.prompt_tokens, "completion_tokens": gen.completion_tokens}
+    return parse_subqueries(gen.text), info
+
+
 def retrieve_with_plan(method: str, question: str, tool: SearchTool, llm: LLM, top_k: int) -> Context:
     t0 = time.perf_counter()
     records: list[SearchRecord] = []
     seen: set[str] = set()
+    subqueries: list[str] | None = None  # 拆解只调一次模型，结果给计划里每个 decompose 位置依次取用
     for kind in PLANS[method]:
         info: dict = {}
         query, fallback = question, False
-        if kind != "original":
+        if kind == "decompose":
+            if subqueries is None:
+                subqueries, info = _decompose(llm, question)
+            i = sum(r.kind == "decompose" for r in records)
+            if i < len(subqueries):
+                query = subqueries[i]
+            else:
+                fallback = True  # 子查询不够（只拆出 1 个或解析失败）：这一位退回原问题
+        elif kind != "original":
             rewritten, info = _rewrite(llm, kind, question, records)
             if rewritten is None:
                 fallback = True

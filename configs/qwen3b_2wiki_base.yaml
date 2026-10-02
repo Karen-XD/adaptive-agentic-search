@@ -1,0 +1,14 @@
+# 2Wiki 基础配置（Day 10.4 起）：模型、解码、预算和 qwen3b_base.yaml 完全相同，只换数据和检索服务。
+# 检索服务另起一个，端口 8101（索引是 2Wiki 的语料池），和 HotpotQA 的 8100 分开，配置写错端口会连到错的语料：
+#   python -m retrieval.server --index indexes/2wiki_pool_v1_bm25 --dense-index indexes/2wiki_pool_v1_e5 \
+#       --reranker /root/autodl-tmp/hf_models/bge-reranker-base --port 8101
+# retrieval.method 是 2Wiki 上 B3 选出的检索栈（选法见 docs/PROGRESS.md Day 10.4）；B3 候选配置各自显式覆盖
+extends: qwen3b_base.yaml
+data:
+  dir: data/2wiki/v1
+  split: debug
+retrieval:
+  type: http
+  url: http://127.0.0.1:8101
+  method: dense
+  rerank: true

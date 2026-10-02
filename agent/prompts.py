@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.native_tools import FINAL_ANSWER_TOOL, SEARCH_TOOL, native_system_prompt
+from agent.native_tools import DECOMPOSE_TOOL, FINAL_ANSWER_TOOL, SEARCH_TOOL, native_system_prompt
 from agent.schema import Observation
 
 TASK = ("Answer the question by searching a document collection. Call exactly one function per turn. "
@@ -49,6 +49,11 @@ EVIDENCE_REWRITE_TASK = ("Answer the question by searching a document collection
                          "The information found so far is not enough: search again with different keywords "
                          "for what is still missing.")
 STATIC_REWRITE_SYSTEM_PROMPT = native_system_prompt(STATIC_REWRITE_TASK, [SEARCH_TOOL])
+# 静态拆解（Day 10.4）：和静态改写一样只看问题，区别是一次写出最多 2 个子查询（预算和两跳的组相同）
+DECOMPOSE_TASK = ("Split the question into the separate pieces of information it needs, and write one search query "
+                  "for each piece (at most 2 queries) for a Wikipedia paragraph search engine. "
+                  "Call decompose exactly once.")
+DECOMPOSE_SYSTEM_PROMPT = native_system_prompt(DECOMPOSE_TASK, [DECOMPOSE_TOOL])
 EVIDENCE_REWRITE_SYSTEM_PROMPT = native_system_prompt(EVIDENCE_REWRITE_TASK, [SEARCH_TOOL])
 REWRITE_FORMAT_HINT = 'Use exactly one tool call: <tool_call>{"name": "search", "arguments": {"query": "..."}}</tool_call>'
 

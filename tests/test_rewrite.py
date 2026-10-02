@@ -79,3 +79,38 @@ def test_budget_must_match_plan(method, n):
     check_budget(method, Budget(max_search_calls=n))
     with pytest.raises(ValueError):
         check_budget(method, Budget(max_search_calls=n + 1))
+
+
+# ---------- 静态拆解（Day 10.4） ----------
+
+def decompose_call(*subqueries):
+    return call("decompose", subqueries=list(subqueries))
+
+
+def test_decompose_searches_each_subquery_with_one_llm_call():
+    traj, llm, tool = run("two_hop_decompose", [decompose_call("Tessa Marrow birthplace", "Luminara Labs founder")])
+    assert [q for q, _ in tool.calls] == ["Tessa Marrow birthplace", "Luminara Labs founder"]
+    s = traj.context.searches
+    assert [r.kind for r in s] == ["decompose", "decompose"] and not any(r.fallback for r in s)
+    assert s[0].generated is not None and s[1].generated is None  # 一次调用，成本只记一次
+    assert len(llm.seen_messages) == 2 and llm.seen_messages[0][1]["content"] == f"Question: {Q}"  # 只看问题
+    assert traj.budget_state.search_calls_used == 2
+
+
+def test_decompose_short_or_broken_falls_back_to_question():
+    traj, _, tool = run("two_hop_decompose", [decompose_call("Tessa Marrow birthplace")])
+    assert [q for q, _ in tool.calls] == ["Tessa Marrow birthplace", Q] and traj.context.searches[1].fallback
+    traj, _, tool = run("two_hop_decompose", ['{"name": "decompose", "arguments": {"subqueries": "oops"}}'])
+    assert [q for q, _ in tool.calls] == [Q, Q] and all(r.fallback for r in traj.context.searches)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ('<tool_call>{"name": "decompose", "arguments": {"subqueries": ["a b", "A  B!", "c"]}}</tool_call>', ["a b", "c"]),
+    ('<tool_call>\n{"name": "decompose", "arguments": {"subqueries": ["x", "y", "z"]}}', ["x", "y", "z"]),  # 缺结尾标签
+    ('<tool_call>{"name": "search", "arguments": {"query": "x"}}</tool_call>', []),  # 用错了工具
+    ('<tool_call>{"name": "decompose", "arguments": {"subqueries": ["", 3, "ok"]}}</tool_call>', ["ok"]),
+    ("I would search for x and y.", []),
+])
+def test_parse_subqueries(text, expected):
+    from agent.rewrite import parse_subqueries
+    assert parse_subqueries(text) == expected
