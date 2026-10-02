@@ -10,8 +10,9 @@ from agent.schema import Doc
 
 
 class HttpSearchTool:
-    def __init__(self, url: str, timeout_s: float = 5.0):
+    def __init__(self, url: str, timeout_s: float = 5.0, method: str = "bm25"):
         self.url = url.rstrip("/")
+        self.method = method  # bm25 / dense / hybrid，同一个服务按 method 分发
         self.client = httpx.Client(timeout=timeout_s)
 
     def health(self) -> dict:
@@ -20,6 +21,6 @@ class HttpSearchTool:
         return r.json()
 
     def search(self, query: str, top_k: int) -> list[Doc]:
-        r = self.client.post(f"{self.url}/search", json={"query": query, "top_k": top_k})
+        r = self.client.post(f"{self.url}/search", json={"query": query, "top_k": top_k, "method": self.method})
         r.raise_for_status()
         return [Doc(**d) for d in r.json()["docs"]]

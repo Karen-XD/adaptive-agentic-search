@@ -62,9 +62,9 @@ def test_no_match_returns_empty(tool):
 
 
 def test_service_matches_local_tool(tool):
-    client = TestClient(create_app(tool))
-    assert client.get("/health").json()["index"]["num_docs"] == len(CORPUS)
-    r = client.post("/search", json={"query": "Luminara Labs founder", "top_k": 2}).json()
+    client = TestClient(create_app({"bm25": tool}))
+    assert client.get("/health").json()["methods"]["bm25"]["num_docs"] == len(CORPUS)
+    r = client.post("/search", json={"query": "Luminara Labs founder", "top_k": 2}).json()  # 不传 method 默认 bm25
     assert [d["doc_id"] for d in r["docs"]] == [d.doc_id for d in tool.search("Luminara Labs founder", 2)]
     assert client.post("/search", json={"query": "x", "top_k": 0}).status_code == 422  # 参数非法
 

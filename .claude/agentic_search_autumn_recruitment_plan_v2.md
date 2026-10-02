@@ -354,6 +354,13 @@ B4 的初始启发式可以是短实体/型号词 → BM25、较长语义表达 
 
 **验收**：三个 Retriever 可通过同一 API 调用，结果含一致的 IDs、得分、Rank 和工具耗时。
 
+**2026-10-02 实际结果与调整（以这里为准）**
+
+- 结果见 `docs/PROGRESS.md` 的"Day 8 检索部分完成"。要点：Dense（e5-base-v2）在 HotpotQA 上比 BM25 高 14.5 个点召回@3，一次检索就超过 V1 的 BM25 多轮 Agent；等权 RRF Hybrid 在 HotpotQA 上不如 Dense，在 2Wiki 上又显著强于 Dense。
+- **第 4 条"考虑规则 Router"降级**：先量了路由上限（`experiments/routing_ceiling.py`），逐题理想路由只比最强的固定一路多 3～5 个点，57%～70% 的题两路打平。真实路由器拿不到上限的一半，落在噪声里 → 选检索器只做一个小消融，不作为 V2 主线卖点。
+- **主线转向查询构造**：2Wiki 上整句问题召回 0.59，换成"实体 + 关系"的理想子查询 0.97，三路全落空从 42% 降到 2%。查询构造的影响远大于选哪一路 → Day 10 的改写 / 拆解是重点，Day 12 主实验的消融权重相应调整。
+- **新增 2Wiki 分析集**（`data_prep/prepare_2wiki.py`，38.5 万段语料池、按题型分层的 2000 题）：用来测问题拆解和跨数据集稳健性；组合题（compositional）是 DECOMPOSE 的直接评测场。目前只有 analysis 划分，要当正式评测集需另抽 validation / test。
+
 ## Day 9｜Reranker 与最关键的强基线
 
 1. 选择现成 Cross-Encoder/Reranker，不从零训练。候选池先取 Top20，Rerank 后输出 Top5 给 Agent。
@@ -361,6 +368,8 @@ B4 的初始启发式可以是短实体/型号词 → BM25、较长语义表达 
 3. 记录 Reranker 平均调用时间、输入长度和候选数量；确保部署在单卡时与 Agent 推理串行，避免非预期显存竞争。
 
 **验收**：强固定 Funnel 结果完整；新方案将来至少要对比这个基线，而不只和 Vanilla RAG 比。
+
+**2026-10-02 对第 2 条的修正**：Day 8 量出"最强的一路（含要不要混合）依数据集而变"——HotpotQA 上 Dense 最强，2Wiki 上 Hybrid 显著更强。所以 B3 不能写死成 `Always Hybrid + Rerank`：**每个数据集都同时跑 `Always Dense + Rerank` 和 `Always Hybrid + Rerank`，取实测更强者为 B3，并在结果表里注明挑选依据**。强基线不能刻意做弱。
 
 ## Day 10｜Query Reformulation：把已有 Rewrite 经历用在新问题上
 

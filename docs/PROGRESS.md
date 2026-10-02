@@ -7,7 +7,33 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**下一步：Day 8（Dense + Hybrid 的效果与成本）** —— 给语料池建向量索引，加混合检索，和 BM25 比证据召回和成本。开工前要定：嵌入模型选哪个（候选 e5 / bge 系列的 base 尺寸）、向量索引放哪个环境（`dsr1` 有没有 faiss，`verl_env` 不装新包）、建索引时 GPU 怎么和 vLLM 分（vLLM 占约 19GB，建索引期间可能要先停掉）。
+**Day 8 检索部分完成（2026-10-02）：BM25 / Dense / Hybrid 三路检索走同一个 `/search`，验收通过。** validation 200 题、原问题搜一次的发现（运行 `20261002-114642-day8-retriever-compare-validation-dirty`，代码未提交时跑的，重跑逐题一致）：
+- **Dense（e5-base-v2）大幅领先 BM25**：召回@3 0.565 → 0.710（+14.5 [+9.8, +19.3]），两段都找齐@3 0.28 → 0.475；比较题 0.585 → 0.976，桥接题 0.560 → 0.641
+- **Dense 搜一次（0.710）已经高于 V1 Agent 用 BM25 搜多轮（0.677）**：换检索器的收益比多轮的收益还大。同一批 Agent 查询换成 Dense 重放：0.677 → 0.765（+8.8 [+4.5, +13.0]）
+- **等权 Hybrid 没有超过 Dense**：整体召回@3 −2.2 [−5.8, +1.3]；比较题显著更差（−12.2 [−18.3, −6.1]），BM25 把只"提到"实体的段落挤进前排；只在前 10～20 条略高（0.848 vs 0.825）
+- 互补性有限：前 5 条里的金标，两路都找到 229 段、只有 Dense 79 段、只有 BM25 20 段（全是桥接题）、都没找到 72 段
+- 成本（CPU、进程内）：BM25 中位数约 8ms（原问题）/ 27ms（Agent 短查询，原因未查）；Dense 约 40～55ms（查询编码约 21ms + FAISS 暴力搜约 27ms）；Hybrid 约 65ms。V1 每次模型调用中位数 492ms → 检索耗时不是成本大头。内存：BM25 +0.9GB、Dense +2.2GB；磁盘 449MB / 1.8GB
+
+**Day 8.7 路由上限分析（2026-10-02）：结论是"换检索器"这条线的空间很小，而且换第二个数据集也救不回来；真正的空间在查询构造。** 两数据集同一套代码（`experiments/routing_ceiling.py`）：
+
+| 口径（金标召回@3） | HotpotQA validation | 2Wiki analysis |
+|---|---|---|
+| 固定 BM25 | 0.565 | 0.530 |
+| 固定 Dense | **0.710** | 0.588 |
+| 固定 Hybrid | 0.688 | **0.602** |
+| 按题型路由 | — | 0.605 |
+| 逐题理想（路由上限） | 0.765（+5.5） | 0.637（+3.4） |
+| 三路都找不到的金标 | — | 桥接比较 52.5% / 组合 46% / 推理 41.7% / 比较 3.4% |
+
+- **最强的一路依数据集而变**：HotpotQA 上 Dense 显著赢 Hybrid（−2.2 [−5.8, +1.3]，不显著）；2Wiki 上 Hybrid 显著赢 Dense（+1.4 [+0.7, +2.2]）。→ "总是混合检索"这个计划默认值在一个数据集上对、另一个上错，说明 B3 强基线必须按数据集用数据挑，不能写死
+- **路由上限只有 3～5 个点，真实路由器再打个对折，落在噪声里**。2Wiki 上 Dense 赢 437 题、BM25 赢 168 题、**1395 题打平**（70%）；HotpotQA 上 69 / 18 / 113
+- **理想子查询（4563 跳，来自标签里的（实体, 关系, 值）三元组，金标是该实体的段落）**：Dense 0.968、BM25 0.771、Hybrid 0.910、逐跳理想 0.980，三路全落空只有 2%
+  - 换成"实体 + 关系"的干净查询，Dense 几乎解决任务；**Hybrid 比 Dense 低 5.8 [−6.6, −5.0]，显著**（BM25 弱 20 个点，融合时被拖累）
+  - 同一个语料、同一个模型，只换查询构造方式，召回从 0.588（整句问题）到 0.968（实体 + 关系）→ **查询构造的影响 ≫ 选哪一路检索器**
+- 组合题（2Wiki 的 compositional，如"Mina Gerhardsen 父亲的出生日期"）：整句提问 0.524，拆解成子查询 0.975。这是计划里标为"拓展"的 Query Decomposition 的直接数据支持
+- 按题型路由 ≈ 固定最强那一路（2Wiki 上 0.605 vs 0.602），题型规则没有额外价值
+
+**下一步：** ① 提交 Day 8 代码，在干净 commit 上重跑对比；② 换检索器重跑 Static RAG / Agent（真反事实，要起 vLLM），看召回优势能不能转成准确率；③ Day 9 Reranker + 强固定基线（B3 = 每个数据集上实测最强的那一路 + 重排，见待办）；④ 2Wiki 作为第二个分析集，用来测 Query Reformulation / Decomposition 和跨数据集稳健性。
 V2 评测口径已定：贪心 + 3 个采样 seed，多数 seed 显著才算显著；检索侧主指标证据召回。
 
 > 2026-09-29 思考题回顾（"换 seed 答案就变，能不能变成信号"）：用户答"一致说明分布尖锐、确定；不一致说明不确定，可以多给搜索次数"。数据（Agent 3 个采样 seed）：
@@ -39,16 +65,18 @@ V2 评测口径已定：贪心 + 3 个采样 seed，多数 seed 显著才算显�
 关机（非释放实例）后两个盘都在，代码、数据、索引、模型、记忆文件都还在；**只有 tmux 会话会消失**。
 
 ```bash
-# 1. 确认资产都在（应输出 3 行都存在）
+# 1. 确认资产都在（应输出 5 行都存在）
 ls -d /root/autodl-tmp/adaptive-agentic-search/data/hotpotqa/v1 \
       /root/autodl-tmp/adaptive-agentic-search/indexes/hotpot_pool_v1_bm25 \
-      /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct
+      /root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct \
+      /root/autodl-tmp/adaptive-agentic-search/indexes/hotpot_pool_v1_e5 \
+      /root/autodl-tmp/hf_models/e5-base-v2
 
-# 2. 重启检索服务（Day 3 跑实验前必须启动）
+# 2. 重启检索服务（Day 3 跑实验前必须启动；Day 8 起带 --dense-index，三路检索都开，加载约 30s、内存约 3.5GB）
 tmux new -d -s retriever "source /root/miniconda3/etc/profile.d/conda.sh && conda activate dsr1 \
   && cd /root/adaptive-agentic-search \
-  && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --port 8100"
-curl -s http://127.0.0.1:8100/health   # 应返回 num_docs: 507494
+  && python -m retrieval.server --index indexes/hotpot_pool_v1_bm25 --dense-index indexes/hotpot_pool_v1_e5 --port 8100"
+curl -s http://127.0.0.1:8100/health   # methods 里应有 bm25 / dense / hybrid，num_docs 都是 507494
 
 # 3. 重启 vLLM 模型服务（Day 3 起，约 50s 就绪，显存占约 19GB）
 #    --guided-decoding-backend 必须加：vLLM 0.6.3 默认后端 outlines 缺依赖，每个请求都会 500
@@ -61,12 +89,29 @@ tmux new -d -s vllm "source /root/miniconda3/etc/profile.d/conda.sh && conda act
 curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 120 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 131 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 8 子步骤
+
+- [x] 8.1 向量索引（2026-10-02）：e5-base-v2（ModelScope 下载，sha256 和 HF 一致）；`dsr1` 装 faiss-cpu 1.15.1（numpy 2.2.6 不变）；`retrieval/dense.py`；50.7 万段 GPU fp16 编码 229s，`IndexFlatIP` 1.8GB
+  - 冒烟：2000 段小语料，按标题搜自己 20/20 排第一；fp16 和 fp32 编码的余弦相似度 ≥ 0.9999995
+- [x] 8.2 混合检索 `retrieval/hybrid.py`（等权 RRF，k=60，每路取 20）；服务 `/search` 加 `method`；客户端、`run_eval`（配置 `retrieval.method`）跟着改；新增 `tests/test_dense_hybrid.py`，测试 131 个通过
+- [x] 8.3 检索对比 `experiments/day8_retriever_compare.py`（validation 200 题）：结果见"当前位置"。BM25 重放 V1 Agent 的 419 个查询，和轨迹里的结果逐条一致（ID 映射没漂移）；两次运行逐题一致
+- [x] 8.4 抽查只有一路找到的金标（前 5 条）：
+  - 只有 BM25（20 段，全是桥接题）：问题里的罕见词出现在段落正文里，但段落讲的是另一个实体（"Shipwrecker" → Mayfair Games，"Johannes Bergion" → Diablo Swing Orchestra）。Dense 把整段压成一个向量，正文里只提一次的罕见词被稀释
+  - 只有 Dense（79 段，比较题 25）：① 用描述代替名字（"Queen of Denmark" → Hamlet (1996 film)，"中国官方通讯社的社长" → Liao Chengzhi）；② 要找"讲的就是这个实体"的段落：Mick Jagger 被很多段落提到，BM25 把"提到"的排前面，Dense 把"关于他"的排前面
+  - 一句话：**BM25 匹配"提到"，Dense 匹配"关于"**
+- [x] 8.5 验收：检索服务带 `--dense-index` 起在 tmux `retriever`；三种 method 返回统一的 ID / 分数 / 名次 / 来源 / 耗时；不传 method 默认 bm25；未加载的 method 400、未知的 422
+- [ ] 8.6 提交后在干净 commit 上重跑对比；换检索器重跑 Static RAG / Agent（要起 vLLM）
+- [x] 8.7 路由上限分析（2026-10-02）：`data_prep/prepare_2wiki.py` + `experiments/routing_ceiling.py`；结果见"当前位置"
+  - 2Wiki 数据：语料池 38.5 万段（train + dev 的上下文去重），分析集从 train 按题型分层各抽 500 题（2000 题）；金标 = supporting_facts 里的标题（比较 / 组合 / 推理题 2 段，桥接比较题 4 段），和 HotpotQA 同一口径
+  - 2Wiki 的 evidences 三元组给了"理想子查询"的构造：每个（实体, 关系）造一个查询，实体名去掉括号里的消歧义词（Agent 从正文里读到的名字不带它）
+  - 脚本先在 HotpotQA 上跑通，数字和 Day 8 完全一致（0.565 / 0.710 / 0.688，逐题赢家 69 / 18 / 113）
 
 ## Day 7 子步骤
 
@@ -222,6 +267,12 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 内容 | 路径 | 重建命令 |
 |---|---|---|
 | HotpotQA 原始数据（360MB） | `data/raw/hotpotqa_distractor/` | 从 hf-mirror 下载，sha256 见 manifest |
+| 2Wiki 原始数据（373MB） | `data/raw/2wiki/` | hf-mirror `xanhho/2WikiMultihopQA` 的 train / dev parquet，sha256 见 manifest |
+| 2Wiki 语料池 + 分析集（175MB） | `data/2wiki/v1/` | `python -m data_prep.prepare_2wiki` |
+| 2Wiki BM25 索引（293MB） | `indexes/2wiki_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/2wiki/v1/corpus.jsonl --index indexes/2wiki_pool_v1_bm25` |
+| 2Wiki Dense 索引（1.3GB） | `indexes/2wiki_pool_v1_e5/` | `python -m retrieval.dense build --corpus data/2wiki/v1/corpus.jsonl --index indexes/2wiki_pool_v1_e5 --model /root/autodl-tmp/hf_models/e5-base-v2` |
+| e5-base-v2（438MB） | `/root/autodl-tmp/hf_models/e5-base-v2/` | ModelScope `intfloat/e5-base-v2` + aria2c，只下 PyTorch 推理要的文件（sha256 `d0d559c4…`，和 HF 一致） |
+| Dense 索引（1.8GB） | `indexes/hotpot_pool_v1_e5/` | `python -m retrieval.dense build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_e5 --model /root/autodl-tmp/hf_models/e5-base-v2`（GPU，约 4 分钟；vLLM 占着显存时先停） |
 | 语料池 + 划分 + 清单（270MB） | `data/hotpotqa/v1/` | `python -m data_prep.prepare_hotpot` |
 | BM25 索引（449MB） | `indexes/hotpot_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_bm25` |
 | Qwen2.5-3B-Instruct（6.17GB） | `/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct/` | `bash /root/Search-R1/download_model_modelscope.sh`（ModelScope + aria2c，约 5 分钟） |
@@ -321,6 +372,14 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-09-29 | 解析规则改为"取 `<tool_call>` 后第一个完整 JSON 对象，后面的内容丢弃并记录"（闭合、未闭合都一样），推翻 3.3 的"JSON 后面还有文字就报错" | 和停止词语义一致：写了 `</tool_call>` 时后面的一切本来就被截掉、只执行第一个动作；只因漏了结尾标签就判没作答，口径不一致。validation 强制轮 4 次都是这种（乱码 `hendrix`、半个新调用） |
 | 2026-09-29 | 引号修复只在 `{"name": 工具, "arguments": {参数: "值"}}` 单字符串参数骨架下做，值取到最后一个 `"}}`；值里像有第二个参数就不修；修完照常走结构层校验 | 两个工具都只有一个字符串参数，边界无歧义；模型不会转义引号，同一题重试 4 次都一样，靠重试救不回。`})` 这类笔误不修，重试能改对 |
 | 2026-09-29 | 解析失败的报错用 user 消息发回；合法调用的返回（检索结果、重复查询、超预算）仍用 tool 消息 | 解析失败 = 没有合法工具调用，就没有"工具返回"；包进 `<tool_response>` 时纯文字作答后 16/26 轮去搜，疑似把报错当成检索结果。效果待 validation 重跑验证 |
+| 2026-10-02 | 嵌入模型用 e5-base-v2 | Search-R1 的向量检索用的就是它，V3 接 Search-R1 时口径一致；英文；base 尺寸 768 维，50 万段 4 分钟编完 |
+| 2026-10-02 | 段落编码 = `passage: 标题\n正文`，截断 512 | 和 BM25 一样带标题（标题就是实体名）；512 只截掉 0.05% 的段落，256 会截 2.4%；按长度排序分批，padding 少，不怎么变慢 |
+| 2026-10-02 | 向量索引用 FAISS `IndexFlatIP`（精确检索），不用 HNSW / IVF | 50 万段 CPU 暴力搜约 27ms，可以接受；精确检索没有近似召回损失，和 BM25 比较时少一个变量。近似索引留到 fullwiki（520 万段）再评估 |
+| 2026-10-02 | faiss-cpu 装进 `dsr1` | 项目代码的环境；`verl_env` 不装新包；CPU 版不和 vLLM 抢显存 |
+| 2026-10-02 | 段落 GPU fp16 编码；查询 CPU fp32 编码 | 段落只编一次，fp16 快，和 fp32 的余弦 ≥ 0.9999995；查询单条 10～20ms，放 CPU 不占显存、不和 vLLM 抢，fp32 换机器重跑可逐位复现 |
+| 2026-10-02 | `/search` 加 `method`，默认 bm25；没加载的 method 返回 400，`run_eval` 开跑前检查服务有没有这一路 | V1 配置不传 method，原样可复现；不悄悄退回 BM25，否则对比会失真 |
+| 2026-10-02 | 融合用等权 RRF（k=60，每路取 20），同分按 doc_id；融合前检查两个索引的 doc_id 顺序完全一致 | 两路分数量纲不同，RRF 不需要校准；k=60 沿用 Cormack 2009；doc_id 是标题哈希，同分时不偏向哪一路；ID 对不上就报错，不融合错的东西 |
+| 2026-10-02 | 检索对比脚本只跑 validation / debug（拒绝 test）；输出 `per_question.jsonl` 代替 `trajectories.jsonl` / `errors.csv` | 阈值和结论只在 validation 上得；纯检索分析没有作答轨迹 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
@@ -331,6 +390,17 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - `eval/src/`：上次写的 base / rag / agent 评测和 GRPO 代码。
 
 ## 待办 / 开放问题
+
+- **B3 强固定基线的定义（Day 9）**：HotpotQA 上 Dense 最强、2Wiki 上 Hybrid 最强 → 每个数据集都同时跑 Always Dense + Rerank 和 Always Hybrid + Rerank，取实测更强者，并在表里注明是怎么挑的。强基线不能刻意做弱
+- **"选检索器"降级为一个小消融**，不作为主线卖点：路由上限只有 3～5 个点、真实路由器更少，如实报告。主线的成本论证改成"重排 / 改写要不要做"和"何时停"
+- **主线跟着数据走：查询构造 ≫ 检索器选择**（整句提问 0.588 → 实体 + 关系 0.968）。Day 10 的三组改写对照（原问题 / 静态改写 / 证据条件改写）是重点，2Wiki 的组合题可以直接验证问题拆解（DECOMPOSE）的收益
+- 2Wiki 上理想子查询里 Hybrid < Dense（−5.8，显著）：BM25 弱 20 个点，融合被拖累。→ 融合的两路实力差距大时要降权或先做分数校准，这条经验写进 Day 10 的结论
+- 2Wiki 的 2000 题分析集用均匀按题型分层（每类 500），和真实分布不同（inference 只占 2.6%）；只按题型报告，不报一个混合平均。要报混合数就用自然分布重抽
+- 2Wiki 目前只有 analysis 划分；若以后当正式评测集，要另抽 validation / test 且与分析集不重叠（脚本里已写明）
+- 加权 RRF（Dense 权重更高）或调 k：只在 validation / analysis 上调；调多了会过拟合
+- 换检索器重跑 Static RAG / Agent（真反事实）：Agent 查询重放只说明"同样的查询换检索器"，换了检索器 Agent 会写出不同的查询
+- e5 预训练数据里有维基的（标题, 段落）对，和 HotpotQA 段落形式一致 → 这里 Dense 的优势可能偏大；商品搜索（Day 13）型号词、品牌词多，要重新验证，不能直接外推
+- BM25 在 Agent 短查询上比原问题慢（27ms vs 8ms），原因没查（bm25s 实现细节）；不影响结论，成本分析时按实测报
 
 - ~~观察结果用 `role="tool"` 拼回，要核对 Qwen2.5 对话模板的实际渲染~~ → 2026-09-28 已核对：包进 `<tool_response>`，方式正确。
 - 3.5 看轨迹时专门看查询改写：每个 Agent 查询的金标排名 vs 原问题的金标排名，统计改写是得是失（例：`Mary Gordon birth year` 让金标 1 → 2，`H. L. Mencken birth year` 让 5 → 10）。
