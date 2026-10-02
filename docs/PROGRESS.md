@@ -7,6 +7,50 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
+**⏸ Day 11 进行中（2026-10-02 暂停在这里，下次从"Day 11 下一步"接着做）：按需升级（cascade）的代码、离线推算、HotpotQA 在线验证已完成；2Wiki 在线、多 seed、文档还没做。最新 commit 见 git log（代码在 `ccc54ad`）。**
+
+做什么：B3 先搜一次（Dense + 重排）→ **门控**决定要不要花一次模型调用去**探测** → 探测时模型写了新查询才搜第二次，否则用第一跳证据作答。代码 `agent/cascade.py`，配置 `configs/qwen3b_cascade_*.yaml`、`configs/qwen3b_2wiki_cascade_*.yaml`，脚本 `experiments/run_cascade.sh`、`experiments/day11_cascade_offline.py`，测试 `tests/test_cascade.py`（共 165 个测试通过）。
+- 门控 `gate`：`never`（= B3）/ `always` / `rerank_gap`（重排第 1、2 名分差 > 门槛才探测，不调模型）
+- 探测 `probe`：`rewrite`（Day 10 证据改写提示词，只有 search 工具）/ `agent`（Agent 提示词，可以直接 final_answer，省一次作答调用）
+- 设计关键：`gate=always + probe=rewrite` 看到的内容和 `two_hop_evidence` 逐字相同、`gate=never` 和 B3 逐字相同 → 贪心解码下门控策略可以用 B3 和两跳两次运行**离线精确推算**
+
+**离线推算（validation，`python -m experiments.day11_cascade_offline`）**：
+
+| | HotpotQA：EM / 输入 token / 耗时 | 2Wiki：EM / 输入 token / 耗时 |
+|---|---|---|
+| B3（从不探测） | 0.405 / 589 / 321ms | 0.346 / 683 / 322ms |
+| 每题都探测 | 0.425 / 1312 / 1086ms | 0.386 / 1569 / 1151ms |
+| 理想门控（只升有益的题，上限） | 0.435 / 618 | 0.403 / 751 |
+| 分差门控，本数据集选门槛 | 门槛 5.69：探测 25%、EM 0.425、771 | 门槛 4.19：探测 40%、EM 0.390、1099 |
+| **分差门控，另一个数据集选的门槛（样本外）** | 门槛 4.19：探测 34%、EM 0.430、846 | 门槛 5.69：探测 30%、EM 0.379（拿到升级收益的 81%）、994 |
+
+- 信号：重排分差（大 → 需要升级）预测"升级有益"的 AUC 约 0.74（两个数据集都是）；前 3 名平均分稍弱，第 1 名分数最弱
+- 和随机门控比：探测 30% 的题时，分差门控拿到升级收益的 125% / 81%（HotpotQA / 2Wiki），随机只有 27% / 30%
+- 模型"拒绝再搜"从不误伤：升级有益的题（6 / 45）全部愿意再搜；有害的题（2 / 13）也全部愿意再搜 → 门控只负责省探测成本，"要不要真的再搜"交给模型
+
+**HotpotQA 在线验证（validation 200 题，commit `ccc54ad`，运行 `20261002-205730` / `210114` / `210317`）**：
+
+| | EM | − B3（配对 bootstrap） | 检索次数 | 模型调用 | 输入 token | p50 / p95 |
+|---|---|---|---|---|---|---|
+| B3 | 0.405 | — | 1.00 | 1.00 | 589 | 308 / 368ms |
+| 两跳证据改写（Day 10） | 0.425 | +2.0 [−0.5, +5.0] | 2.00 | 2.00 | 1312 | 1099 / 1644ms |
+| cascade 每题都探测（rewrite） | 0.425 | +2.0 [−0.5, +5.0] | 1.45 | 2.00 | 1312 | 1104 / 1636ms |
+| **cascade 分差门控（门槛 4.19，样本外）** | **0.430** | **+2.5 [+0.5, +5.0]，显著** | 1.21 | 1.34 | **846** | **338** / 1475ms |
+| cascade 每题都探测（agent 提示词） | **0.485** | **+8.0 [+3.0, +13.0]，显著** | 1.46 | 1.54 | 1125 | 905 / 1535ms |
+
+- **离线推算精确**：在线"每题都探测"和两跳证据改写的最终答案 200/200 逐字一致；在线分差门控和离线推算 200/200 一致 → 以后调门槛可以离线做，不用重跑
+- **分差门控是目前最好的质量–成本点**：只探测 34% 的题、21% 的题真的再搜，拿到了全部升级收益（EM 甚至比每题都探测高 0.5），输入 token 只有 B3 的 1.44 倍（每题都探测是 2.2 倍），p50 几乎不变（338 vs 308ms），只有被升级的题拉长 p95
+- **agent 探测的 +8.0 是新发现，来源还没查清**（outcome：escalated 91 / answered 92 / format_error 14 / duplicate 3）。和 rewrite 探测的区别：不想再搜时，模型在 **Agent 提示词 + 工具返回格式**下直接调用 final_answer，这个答案直接用，不走 B3 的 answer-only 作答提示词。怀疑收益主要来自"作答格式"而不是升级本身——若属实，B3 本身就该换作答格式，会动到所有基线，**改之前要先和用户讨论**
+
+**Day 11 下一步（按顺序）**：
+1. 拆 agent 探测 +8.0 的来源：按 outcome 分组，和 B3 同题比 EM；重点看 answered 92 题（作答格式的影响）和 escalated 91 题（这部分作答仍是 answer-only 提示词）；看答案形式（yes/no、全名、句子）有没有系统差异
+2. 2Wiki 在线：`tmux kill-session -t retriever`，起 8101 的 2Wiki 检索服务（恢复清单 3b），再 `bash experiments/run_cascade.sh 2wiki`（分差门控门槛 5.69 是在 HotpotQA 上选的，样本外）
+3. 多 seed：分差门控和 agent 探测各跑 3 个采样 seed（temperature 0.7），按 V2 口径（多数 seed 显著才算显著）。采样下离线推算不再精确，要在线跑
+4. 更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
+5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
+
+**暂停时的服务状态**：tmux `vllm`（8000）、`retriever`（8100，HotpotQA + Dense + 重排）在跑；`retriever_2wiki`（8101）已停。重启服务器后 tmux 全部消失，按下面的恢复清单重启。
+
 **Day 10.4 完成（2026-10-02）：2Wiki 上证据条件改写的收益更大、显著（EM +4.0、组合题 +14.0）；只看问题的静态拆解没用；"拒绝再搜"信号在 2Wiki 上 385 题零翻转。**
 
 2Wiki validation（每类题 200，共 800）、贪心、Dense + 重排、作答提示词和 B3 相同：
@@ -192,12 +236,22 @@ curl -s http://127.0.0.1:8000/v1/models   # 应列出 qwen2.5-3b-instruct
 #      --dense-index indexes/2wiki_pool_v1_e5 --reranker /root/autodl-tmp/hf_models/bge-reranker-base --port 8101"
 
 # 4. 自检
-cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 154 passed
+cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 165 passed
 ```
 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 11 子步骤
+
+- [x] 11.1 离线分析：门控信号（重排分差 / 前 3 平均分 / 第 1 名分数）的 AUC、质量–成本曲线、和随机门控对比、门槛跨数据集迁移（`experiments/day11_cascade_offline.py`）
+- [x] 11.2 `agent/cascade.py` + `Escalation` 轨迹字段 + `probe_rate` / `escalation_rate` / `escalation_outcomes` 指标；`run_eval` 读配置里的 `cascade:` 段；测试 11 个（含和 B3、两跳证据改写的逐字等价）
+- [x] 11.3 HotpotQA 在线：每题都探测（验证离线推算）、分差门控、agent 探测（结果见"当前位置"）
+- [ ] 11.4 拆 agent 探测 +8.0 的来源
+- [ ] 11.5 2Wiki 在线（分差门控、agent 探测）
+- [ ] 11.6 多 seed 稳健性
+- [ ] 11.7 文档：学习笔记、项目全景、计划文件
 
 ## Day 10 子步骤
 
@@ -529,6 +583,10 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-02 | 改写对照用**固定检索计划**（1 次 / 2 次），不让模型决定搜几次 | Day 10 只比"查询写得好不好"；Agent 循环里查询、停止、作答缠在一起，改一处 77% 轨迹都变（Day 6）。固定计划下两跳的组每题都恰好 2 次，预算相同 |
 | 2026-10-02 | 证据条件改写的上下文用 **Agent 的对话格式**（自己发过的 search 调用 + `<tool_response>` 工具返回），不用"用户消息里给段落" | debug 实测：后者 50 题 0 次用上证据实体；前者 22%。不训练的模型在工具调用这类格式上只认微调时见过的样子（Day 3 已经遇到过一次） |
 | 2026-10-02 | 改写解析失败退回原问题，**不重试**；退回的检索照样执行计费 | 重试次数会让各组成本不同，固定流程的预算必须相同；fallback 率本身还是有用的信号（见"当前位置"） |
+| 2026-10-02 | 按需升级的探测**复用证据改写提示词**，不另写一份 | `gate=always` 就逐字等于两跳证据改写、`gate=never` 逐字等于 B3，门控策略可以用已有的两次运行离线精确推算（在线验证 200/200 一致），调门槛不用反复跑模型 |
+| 2026-10-02 | 分差门槛**跨数据集选**：HotpotQA 用 2Wiki 上选的 4.19，2Wiki 用 HotpotQA 上选的 5.69 | 在同一批题上选门槛再报结果会偏乐观；两个数据集互为样本外，报出来的就是"换一个数据集照搬门槛"的真实效果 |
+| 2026-10-02 | 探测时模型原样重搜原问题 → 不执行，记 `duplicate`，用第一跳证据作答；格式错误 → 记 `format_error`，不重试 | 重搜原问题的结果和第一跳相同，白花一次检索；不重试是为了成本口径和固定流程一致 |
+| 2026-10-02 | cascade 的 `context.latency_ms` 只算第一次检索，第二次检索和探测的耗时记在探测那一步 | `run_eval` 把 context 耗时和每步耗时相加算端到端延迟，分开记不会重复计算 |
 | 2026-10-02 | 2Wiki 的 B3 也定为 Static RAG + Dense + 重排 | Hybrid + 重排 EM +0.2 [−1.1, +1.6] 打平；两个数据集用同一个检索栈，跨数据集比较少一个变量 |
 | 2026-10-02 | 静态拆解做成单独的 `decompose` 工具（参数是列表），不让模型一轮写多个 search | 生成在第一个 `</tool_call>` 就停（每轮一个动作的规则），一轮写不出多个调用；单独的工具也让"拆解"和"改写"在日志里分得开 |
 | 2026-10-02 | 2Wiki 的划分从 train 里分层抽（每类同样多），官方 dev 留作以后的 test | 和 HotpotQA 同一套规则；推理题只占 2.6%，不分层几乎抽不到；按题型报告，不报混合平均 |
