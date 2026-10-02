@@ -159,6 +159,16 @@ class Context(BaseModel):
         return len(self.searches) if self.searches else int(self.query is not None)
 
 
+class Escalation(BaseModel):
+    """按需升级（Day 11，agent/cascade.py）的决策记录：门控看了什么、有没有探测、探测结果是什么。"""
+    gate: str                        # never / always / rerank_gap
+    feature: Optional[float] = None  # 门控特征：第一跳重排第 1 名和第 2 名的分差
+    probed: bool                     # 有没有花一次模型调用去探测
+    # not_probed 门控没放行 / declined 不想再搜 / escalated 再搜了一次 / answered 探测时直接给了答案（agent 探测）
+    # duplicate 想重搜原问题（不执行）/ format_error 探测输出格式错误
+    outcome: Literal["not_probed", "declined", "escalated", "answered", "duplicate", "format_error"]
+
+
 class Trajectory(BaseModel):
     qid: str  # 只用于日志对齐；不会传给检索工具
     question: str
@@ -170,3 +180,4 @@ class Trajectory(BaseModel):
     final_answer: Optional[str] = None
     stop_reason: StopReason
     error: Optional[str] = None  # stop_reason=error 时记录异常类型和信息
+    escalation: Optional[Escalation] = None  # 只有 cascade 方法有

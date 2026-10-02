@@ -1,0 +1,8 @@
+# Day 11 按需升级：每题都探测（证据改写提示词）。答案应该和 two_hop_evidence 逐题相同，用来验证离线推算；
+# 拒绝再搜的题不再搜第二次，所以成本比两跳那组低。检索栈和 B3 相同（Dense + 重排）。
+extends: qwen3b_base.yaml
+name: qwen3b-cascade-always
+method: cascade
+budget: {max_search_calls: 2}
+retrieval: {type: http, url: http://127.0.0.1:8100, method: dense, rerank: true}
+cascade: {gate: always, probe: rewrite}

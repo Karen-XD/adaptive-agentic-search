@@ -1,0 +1,6 @@
+# 2Wiki 按需升级：门槛 5.69 是在 HotpotQA validation 上选的（样本外），见 configs/qwen3b_cascade_gap.yaml
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-cascade-gap
+method: cascade
+budget: {max_search_calls: 2}
+cascade: {gate: rerank_gap, gap_threshold: 5.69, probe: rewrite}

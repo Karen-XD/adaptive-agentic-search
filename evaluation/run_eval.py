@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from agent.llm import RetryingLLM, SearchThenTitleLLM, VLLMClient
+from agent.cascade import CascadeConfig
 from agent.methods import NEEDS_RETRIEVAL, check_budget, run_method
 from agent.prompts import (AGENT_PROMPTS, ANSWER_ONLY_PROMPTS, DECOMPOSE_SYSTEM_PROMPT, EVIDENCE_REWRITE_SYSTEM_PROMPT,
                            STATIC_REWRITE_SYSTEM_PROMPT)
@@ -134,6 +135,9 @@ def main() -> None:
     check_budget(method, budget)  # 在建输出目录之前就检查，配错了不留半成品
     if method in NEEDS_RETRIEVAL and not cfg.get("retrieval"):
         sys.exit(f"{method} 需要 retrieval 配置")
+    cascade = CascadeConfig(**cfg["cascade"]) if method == "cascade" else None
+    if cascade is not None and cascade.gate == "rerank_gap" and not cfg["retrieval"].get("rerank"):
+        sys.exit("gate=rerank_gap 读的是重排分数，retrieval.rerank 必须为 true")
 
     # 代码版本：有未提交改动时 commit hash 代表不了实际跑的代码，默认拒绝运行
     status = _git("status", "--porcelain")
@@ -181,7 +185,7 @@ def main() -> None:
 
     trajectories, consecutive_errors = [], 0
     for i, q in enumerate(questions, 1):
-        traj = run_method(method, q["qid"], q["question"], llm, tool, budget, gold_docs.get(q["qid"]))
+        traj = run_method(method, q["qid"], q["question"], llm, tool, budget, gold_docs.get(q["qid"]), cascade)
         trajectories.append(traj)
         consecutive_errors = consecutive_errors + 1 if traj.stop_reason == StopReason.ERROR else 0
         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
@@ -235,6 +239,7 @@ def main() -> None:
                 "rewritten_searches": len(rewritten),
                 "rewrite_fallbacks": sum(r.fallback for _, r in rewritten),
                 "rewrite_repeats": sum(is_repeat(r, searches[:i]) for i, r in rewritten),
+                "escalation": traj.escalation.model_dump() if traj.escalation is not None else None,
             })
             f.write(json.dumps({**traj.model_dump(mode="json"),
                                 "eval": {"gold": label["answer"], "em": correct, "f1": f1,

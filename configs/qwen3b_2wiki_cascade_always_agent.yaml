@@ -1,0 +1,6 @@
+# 2Wiki 按需升级：每题都探测，Agent 提示词，见 configs/qwen3b_cascade_always_agent.yaml
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-cascade-always-agent
+method: cascade
+budget: {max_search_calls: 2}
+cascade: {gate: always, probe: agent}

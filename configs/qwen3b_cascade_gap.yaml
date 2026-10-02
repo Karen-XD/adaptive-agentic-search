@@ -1,0 +1,9 @@
+# Day 11 按需升级：重排第 1、2 名分差 > 门槛才探测。
+# 门槛 4.19 是在 2Wiki validation 上选的（experiments/day11_cascade_offline.py：EM 不低于每题都探测的最省点），
+# 用到 HotpotQA 上是样本外的：在同一批题上选门槛再报结果会偏乐观
+extends: qwen3b_base.yaml
+name: qwen3b-cascade-gap
+method: cascade
+budget: {max_search_calls: 2}
+retrieval: {type: http, url: http://127.0.0.1:8100, method: dense, rerank: true}
+cascade: {gate: rerank_gap, gap_threshold: 4.19, probe: rewrite}

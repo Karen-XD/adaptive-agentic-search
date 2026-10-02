@@ -7,6 +7,7 @@
 | static_rag（B1） | 原问题检索 top_k 条 | 不能 | final_answer | 1（流程替模型用掉） |
 | oracle（诊断上限） | 金标段落 | 不能 | final_answer | 0（不算检索成本） |
 | rewrite_rag / two_hop_static / two_hop_evidence（Day 10） | 按固定计划检索 1～2 次，查询由模型改写 | 不能 | final_answer | 1 / 2 / 2 |
+| cascade（Day 11） | 原问题检索 1 次，按门控 / 探测决定要不要再搜 1 次 | 探测时能 | final_answer | 2（上限） |
 
 direct / static_rag / oracle 的提示词一字不差，只差用户消息里的证据 → 三者之差就是"证据"带来的差别：
 B0 → B1 是一次检索的收益，B1 → Oracle 是检索还差多少，Oracle → 100% 是阅读（和标签噪声）的损失。
@@ -22,18 +23,20 @@ import time
 from agent.llm import LLM
 from agent.loop import SearchTool, run_episode
 from agent.prompts import ANSWER_ONLY_PROMPTS
+from agent.cascade import CascadeConfig, run_cascade
 from agent.rewrite import PLANS, retrieve_with_plan
 from agent.schema import Budget, Context, Doc, ErrorCode, Observation, Trajectory
 
-METHODS = ("agent", "direct", "static_rag", "oracle", *PLANS)
-NEEDS_RETRIEVAL = {"agent", "static_rag", *PLANS}
+METHODS = ("agent", "direct", "static_rag", "oracle", *PLANS, "cascade")
+NEEDS_RETRIEVAL = {"agent", "static_rag", *PLANS, "cascade"}
 
 
 def check_budget(method: str, budget: Budget) -> None:
     """搜索次数写在配置里，和方法对不上就拒绝运行：成本统计按实际执行的检索算，配错了表就不可比。"""
     if method not in METHODS:
         raise ValueError(f"unknown method {method!r}, choose from {METHODS}")
-    expected = {"direct": 0, "static_rag": 1, "oracle": 0, **{m: len(p) for m, p in PLANS.items()}}.get(method)
+    expected = {"direct": 0, "static_rag": 1, "oracle": 0, **{m: len(p) for m, p in PLANS.items()},
+                "cascade": 2}.get(method)
     if expected is not None and budget.max_search_calls != expected:
         raise ValueError(f"{method} needs budget.max_search_calls={expected}, got {budget.max_search_calls}")
     if method == "agent" and budget.max_search_calls < 1:
@@ -56,7 +59,11 @@ def oracle_context(gold_docs: list[Doc]) -> Context:
 
 
 def run_method(method: str, qid: str, question: str, llm: LLM, tool: SearchTool | None, budget: Budget,
-               gold_docs: list[Doc] | None = None) -> Trajectory:
+               gold_docs: list[Doc] | None = None, cascade: CascadeConfig | None = None) -> Trajectory:
+    if method == "cascade":
+        if cascade is None:
+            raise ValueError("cascade needs a CascadeConfig")
+        return run_cascade(qid, question, llm, tool, budget, cascade)
     if method == "agent":
         return run_episode(qid, question, llm, tool, budget)
     if method == "direct":

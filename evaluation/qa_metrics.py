@@ -77,6 +77,7 @@ def aggregate(records: list[dict]) -> dict:
         "mean_new_docs_per_call": sum(r["new_docs"] for r in records) / total_calls if total_calls else 0.0,
         "stop_reasons": dict(Counter(r["stop_reason"] for r in records)),
         **_rewrite_metrics(records),
+        **_cascade_metrics(records),
         **_evidence_metrics(records),
         **_cost_metrics(records),
     }
@@ -92,6 +93,16 @@ def _rewrite_metrics(records: list[dict]) -> dict:
     return {"mean_rewrite_calls": calls / len(records),
             "rewrite_fallback_rate": sum(r["rewrite_fallbacks"] for r in records) / searches,
             "rewrite_repeat_rate": sum(r["rewrite_repeats"] for r in records) / searches}
+
+
+def _cascade_metrics(records: list[dict]) -> dict:
+    """Day 11 按需升级：多少题被门控放去探测、多少题真的再搜了一次、探测结果的分布。"""
+    esc = [r["escalation"] for r in records if r.get("escalation")]
+    if not esc:
+        return {}
+    return {"probe_rate": sum(e["probed"] for e in esc) / len(esc),
+            "escalation_rate": sum(e["outcome"] == "escalated" for e in esc) / len(esc),
+            "escalation_outcomes": dict(Counter(e["outcome"] for e in esc))}
 
 
 def _cost_metrics(records: list[dict]) -> dict:
