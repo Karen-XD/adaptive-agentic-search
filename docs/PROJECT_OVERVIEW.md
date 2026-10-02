@@ -170,9 +170,17 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 - 意外收获：改写那一步"拒绝再搜"的题（56%）证据和 B3 逐条相同、准确率完全一致 → 这是按需升级的现成判据
 - 在全局里的意义：查询改写的价值不在"改写一次"，而在"根据已看到的证据改写"；升级信号也落到了实处
 
+### Day 10.4：2Wiki 上的拆解与改写（✅ 2026-10-02）
+
+2Wiki validation 800 题（4 类题型各 200），B3 同样是 Dense + 重排、只搜一次：
+- 单次检索的"桥接实体"召回只有 0.066（问题里点了名的实体 0.98）→ 第二跳根本搜不到
+- 只看问题的静态拆解：没用（组合题 EM 0.105 → 0.105），拆出的子查询只能围着问题里的名字打转
+- 看第一跳结果的证据改写：EM +4.0 显著，组合题 0.105 → 0.245、桥接实体召回 0.077 → 0.474
+- "拒绝再搜"在 2Wiki 上 385 题零翻转 → 两个数据集都成立
+- 在全局里的意义：多跳拆解必须"搜一步、看一步"；按需升级的判据在两个数据集上都可靠，可以进 Day 11
+
 ### 接下来（V2）
 
-- **Day 10.4**：2Wiki 组合题测问题拆解（候选池里就缺金标）
 - **Day 11～12**：统一策略接口 + 按需升级的主实验（信号：改写步"拒绝再搜" × 答案一致性），和 B3 比质量–成本
 - **Day 13～14**：商品搜索后端，Stop Point 2
 
@@ -182,7 +190,7 @@ V1 的结论因此定为：**多轮搜索稳定地提高了证据召回，但准
 conda activate dsr1
 cd /root/adaptive-agentic-search
 
-pytest tests/                                                # 144 个测试
+pytest tests/                                                # 154 个测试
 
 # 一次性准备（数据和索引不进 git，实例释放后要重建）
 python -m data_prep.prepare_hotpot                           # 语料池 + 题目划分 + 数据清单
@@ -214,6 +222,8 @@ python -m experiments.day9_rerank_compare --data data/hotpotqa/v1 --split valida
 bash experiments/run_b3_candidates.sh validation                                             # B3 候选端到端
 bash experiments/run_seeds_b3.sh validation                                                  # B3 候选 3 个 seed
 bash experiments/run_rewrite.sh validation                                                   # Day 10 改写对照
+python -m data_prep.prepare_2wiki                                                            # 2Wiki 语料 + analysis / validation / debug
+bash experiments/run_2wiki.sh b3 && bash experiments/run_2wiki.sh rewrite                    # 2Wiki（检索服务在 8101）
 python -m data_prep.prepare_2wiki                                                            # 2Wiki 语料池 + 分析集
 python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
     --bm25-index indexes/2wiki_pool_v1_bm25 --dense-index indexes/2wiki_pool_v1_e5             # 路由上限（HotpotQA 同理）
@@ -240,7 +250,7 @@ python -m experiments.routing_ceiling --data data/2wiki/v1 --split analysis \
 | `configs/` | 实验配置 | `qwen3b_base.yaml` + 四个继承它的方法配置（划分由 `--split` 指定）；`mock_v1.yaml`、`bm25_debug.yaml` |
 | `data_prep/` | 数据准备、数据体检 | HotpotQA 完成 |
 | `data/`、`indexes/` | 数据和索引（不进 git） | HotpotQA、2Wiki 两个语料池，各有 BM25 和 e5 向量索引 |
-| `tests/` | 自动测试 | 144 个 |
+| `tests/` | 自动测试 | 154 个 |
 | `third_party/Search-R1/` | 上游源码，只读参考 | 锁定在 `598e61b` |
 
 ## 8. 面试一分钟版（随进度更新）
