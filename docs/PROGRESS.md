@@ -7,7 +7,31 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**⏸ Day 11 进行中（2026-10-02 暂停在这里，下次从"Day 11 下一步"接着做）：按需升级（cascade）的代码、离线推算、HotpotQA 在线验证已完成；2Wiki 在线、多 seed、文档还没做。最新 commit 见 git log（代码在 `ccc54ad`）。**
+**▶ Day 11 进行中（2026-10-03）：按需升级（cascade）的代码、离线推算、HotpotQA 在线验证、agent 探测 +8.0 的拆解（11.4）已完成；2Wiki 在线（11.5）在跑，多 seed、文档还没做。最新 commit 见 git log（cascade 代码在 `ccc54ad`）。**
+
+**11.4 结论：agent 探测的 +8.0 ≈ +5.5「模型有把握时自己直接答」+ +2.5「真的再搜一次」；单纯换作答格式不显著 → B3 不改。**
+- 按 outcome 和 B3 同题配对：answered 92 题 40 → 51（赢 15 输 4，证据和 B3 逐字相同、召回都是 0.891）；escalated 91 题 35 → 40；format_error 14 / duplicate 3 题不变
+- 格式 2×2 诊断（`experiments/day11_answer_format_probe.py`，运行 `20261003-144020`；证据直接取 B3 轨迹里存的检索结果，"用户消息 × 只能作答"组和 B3 200/200 逐字一致）：
+
+  | 证据位置 × 系统提示 | EM | − B3 |
+  |---|---|---|
+  | 用户消息 × 只能作答（= B3） | 0.405 | — |
+  | 用户消息 × Agent（想搜就按预算用完强制作答） | 0.385 | −2.0 [−7.0, +3.0] |
+  | 工具返回 × 只能作答（17.5% 格式错误：想调用没声明的 search） | 0.390 | −1.5 [−7.0, +4.0] |
+  | 工具返回 × Agent | 0.445 | +4.0 [−1.0, +9.0] |
+
+  "工具返回 × Agent"的 +4 拆开：模型自己选择直接作答的 92 题 +11，想搜却被强制作答的 108 题 −3 → 收益不是"格式更好"，而是"**有把握就用 Agent 格式答、没把握就别硬答**"。B3 整体换格式不显著，且会动到所有基线，不改
+- 离线推算 agent 探测的变体（探测看到的内容和门控无关，贪心下精确；"每题都探测 + 再搜"复现在线 0.485）：
+
+  | HotpotQA | EM | − B3 | 检索 | 输入 token |
+  |---|---|---|---|---|
+  | agent 探测，想搜就再搜（在线） | 0.485 | +8.0 [+3.0, +13.0] | 1.46 | 1125 |
+  | agent 探测，不再搜（想搜的退回 B3 答案） | 0.460 | +5.5 [+1.5, +10.0] | 1.00 | 1045 |
+  | 分差门控 4.19 + agent 探测 | 0.425 | +2.0 [−1.5, +5.5] | 1.19 | 783 |
+  | 分差门控 5.69 + agent 探测 | 0.425 | +2.0 [−0.5, +5.0] | 1.14 | 724 |
+
+- **分差门控和 agent 探测不互补**：直接作答赢的 15 题里 11 题分差 ≤ 4.19（门控放过）。分差门控挑的是"证据不够、该再搜"的题，而直接作答的收益在"证据已经够、B3 读错了"的题上（answered 92 题里 64 桥接、28 比较）
+- 目前 HotpotQA 的质量–成本前沿两个点：分差门控（rewrite 探测）0.430 / 846 token；每题 agent 探测 0.485 / 1125 token（全量多轮 Agent 0.390 / 2314 token）。要等 2Wiki 和多 seed 确认
 
 做什么：B3 先搜一次（Dense + 重排）→ **门控**决定要不要花一次模型调用去**探测** → 探测时模型写了新查询才搜第二次，否则用第一跳证据作答。代码 `agent/cascade.py`，配置 `configs/qwen3b_cascade_*.yaml`、`configs/qwen3b_2wiki_cascade_*.yaml`，脚本 `experiments/run_cascade.sh`、`experiments/day11_cascade_offline.py`，测试 `tests/test_cascade.py`（共 165 个测试通过）。
 - 门控 `gate`：`never`（= B3）/ `always` / `rerank_gap`（重排第 1、2 名分差 > 门槛才探测，不调模型）
@@ -40,16 +64,16 @@
 
 - **离线推算精确**：在线"每题都探测"和两跳证据改写的最终答案 200/200 逐字一致；在线分差门控和离线推算 200/200 一致 → 以后调门槛可以离线做，不用重跑
 - **分差门控是目前最好的质量–成本点**：只探测 34% 的题、21% 的题真的再搜，拿到了全部升级收益（EM 甚至比每题都探测高 0.5），输入 token 只有 B3 的 1.44 倍（每题都探测是 2.2 倍），p50 几乎不变（338 vs 308ms），只有被升级的题拉长 p95
-- **agent 探测的 +8.0 是新发现，来源还没查清**（outcome：escalated 91 / answered 92 / format_error 14 / duplicate 3）。和 rewrite 探测的区别：不想再搜时，模型在 **Agent 提示词 + 工具返回格式**下直接调用 final_answer，这个答案直接用，不走 B3 的 answer-only 作答提示词。怀疑收益主要来自"作答格式"而不是升级本身——若属实，B3 本身就该换作答格式，会动到所有基线，**改之前要先和用户讨论**
+- **agent 探测的 +8.0**（outcome：escalated 91 / answered 92 / format_error 14 / duplicate 3）：来源已在 11.4 拆清（见本节开头），不是单纯的作答格式，B3 不改
 
 **Day 11 下一步（按顺序）**：
-1. 拆 agent 探测 +8.0 的来源：按 outcome 分组，和 B3 同题比 EM；重点看 answered 92 题（作答格式的影响）和 escalated 91 题（这部分作答仍是 answer-only 提示词）；看答案形式（yes/no、全名、句子）有没有系统差异
-2. 2Wiki 在线：`tmux kill-session -t retriever`，起 8101 的 2Wiki 检索服务（恢复清单 3b），再 `bash experiments/run_cascade.sh 2wiki`（分差门控门槛 5.69 是在 HotpotQA 上选的，样本外）
+1. ~~拆 agent 探测 +8.0 的来源~~（11.4 完成，见本节开头）
+2. 2Wiki 在线（2026-10-03 已启动，tmux `cascade2wiki`，日志 `/root/autodl-tmp/logs/cascade_2wiki.log`）：`run_cascade.sh 2wiki`（分差门控 5.69 + agent 探测）跑完后接着跑 2Wiki 的格式诊断（`user_answer_only,tool_agent` 两组，日志 `answer_format_2wiki.log`）。跑完按 11.4 的口径拆 2Wiki 的 agent 探测（outcome 分组配对、"不再搜"变体、分差门控 + agent 探测）
 3. 多 seed：分差门控和 agent 探测各跑 3 个采样 seed（temperature 0.7），按 V2 口径（多数 seed 显著才算显著）。采样下离线推算不再精确，要在线跑
 4. 更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
 5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
 
-**暂停时的服务状态**：tmux `vllm`（8000）、`retriever`（8100，HotpotQA + Dense + 重排）在跑；`retriever_2wiki`（8101）已停。重启服务器后 tmux 全部消失，按下面的恢复清单重启。
+**服务状态（2026-10-03）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）在跑；`retriever`（8100，HotpotQA）没起（11.4 不需要检索服务，2Wiki 期间三个服务一起显存太紧）。重启服务器后 tmux 全部消失，按下面的恢复清单重启。
 
 **Day 10.4 完成（2026-10-02）：2Wiki 上证据条件改写的收益更大、显著（EM +4.0、组合题 +14.0）；只看问题的静态拆解没用；"拒绝再搜"信号在 2Wiki 上 385 题零翻转。**
 
@@ -248,7 +272,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 11.1 离线分析：门控信号（重排分差 / 前 3 平均分 / 第 1 名分数）的 AUC、质量–成本曲线、和随机门控对比、门槛跨数据集迁移（`experiments/day11_cascade_offline.py`）
 - [x] 11.2 `agent/cascade.py` + `Escalation` 轨迹字段 + `probe_rate` / `escalation_rate` / `escalation_outcomes` 指标；`run_eval` 读配置里的 `cascade:` 段；测试 11 个（含和 B3、两跳证据改写的逐字等价）
 - [x] 11.3 HotpotQA 在线：每题都探测（验证离线推算）、分差门控、agent 探测（结果见"当前位置"）
-- [ ] 11.4 拆 agent 探测 +8.0 的来源
+- [x] 11.4 拆 agent 探测 +8.0 的来源：outcome 分组配对 + 作答格式 2×2 诊断（`experiments/day11_answer_format_probe.py`）+ 离线推算 agent 探测变体（结果见"当前位置"）
+  - 诊断脚本不连检索服务：证据直接取 B3 轨迹里存的检索结果（`Context.model_validate`），"用户消息 × 只能作答"组直接调 `run_episode`，必须和 B3 逐字一致才算复用没走样（200/200）
+  - Agent 系统提示下模型想搜：回"预算用完"的报错（和 Agent 循环同一条路径）再让它作答；格式错误照常回报错重试，最多 max_turns 轮
 - [ ] 11.5 2Wiki 在线（分差门控、agent 探测）
 - [ ] 11.6 多 seed 稳健性
 - [ ] 11.7 文档：学习笔记、项目全景、计划文件
@@ -591,6 +617,8 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-02 | 静态拆解做成单独的 `decompose` 工具（参数是列表），不让模型一轮写多个 search | 生成在第一个 `</tool_call>` 就停（每轮一个动作的规则），一轮写不出多个调用；单独的工具也让"拆解"和"改写"在日志里分得开 |
 | 2026-10-02 | 2Wiki 的划分从 train 里分层抽（每类同样多），官方 dev 留作以后的 test | 和 HotpotQA 同一套规则；推理题只占 2.6%，不分层几乎抽不到；按题型报告，不报混合平均 |
 | 2026-10-02 | V2 主线从"自适应选检索器 / 重排"调整为"**按需升级**：默认 B3，需要时升级成多轮" | 选检索器上限 3～5 点、重排已经默认要做（16ms 换 +10 EM）；能省的成本在"多轮 vs 单次"上（4～5 倍），而逐题取较好的上限有 +8～+13 |
+| 2026-10-03 | **B3 不换作答格式**（保持"证据放用户消息 + 只能作答"） | 2×2 诊断里四组只有"工具返回 × Agent"高，+4.0 [−1, +9] 不显著，而且全来自模型自己选择直接作答的题；想搜被强制作答的题反而 −3。换格式会动到 V1 以来所有基线，收益又不显著，不值得 |
+| 2026-10-03 | 格式诊断复用已有运行轨迹里的检索结果，不重新检索 | 四组看到的段落逐字相同，差别只剩格式；不用起检索服务。复用是否走样用"B3 写法组和 B3 运行逐字一致"来检查（200/200） |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
