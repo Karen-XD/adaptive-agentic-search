@@ -7,20 +7,25 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**⏸ Day 11 进行中（2026-10-03 15:05 因断网暂停，下次从"Day 11 下一步"第 2 条接着做）：cascade 代码、离线推算、HotpotQA 在线、agent 探测 +8.0 的拆解（11.4）已完成；2Wiki 在线（11.5）断网时还在 tmux 里跑，多 seed、文档还没做。最新 commit 见 git log（cascade 代码在 `ccc54ad`）。**
+**Day 11 进行中：cascade 代码、离线推算、HotpotQA 在线、agent 探测拆解（11.4）、2Wiki 在线收尾（11.5）已完成；下一步多 seed（11.6）。cascade 代码在 `ccc54ad`。**
 
-**断网时留在服务器上跑的任务（tmux `cascade2wiki`，15:04 时只剩第 3 项，50/800，预计 15:25 左右结束）**：
-1. ✅ 2Wiki 分差门控（门槛 5.69，样本外）：运行 `20261003-144150-qwen3b-2wiki-cascade-gap-validation`。**EM 0.379，− B3 +3.2 [+2.0, +4.6] 显著**；探测 30%、再搜 24%、检索 1.24 次、输入 994 token、p50 / p95 326 / 1490ms → 和离线推算（0.379 / 30% / 994）完全一致，2Wiki 上离线推算也是精确的
-2. ✅ 2Wiki agent 探测（每题都探测）：运行 `20261003-144949-qwen3b-2wiki-cascade-always-agent-validation`。EM 0.390（B3 0.346，配对区间还没算）；再搜 58.5%、输入 1437 token；outcome：escalated 468 / answered 281 / format_error 33 / duplicate 18。和 HotpotQA 比，再搜的比例高得多（58.5% vs 45.5%），符合 2Wiki 组合题需要桥接实体
-3. ⏳ 2Wiki 格式诊断（`user_answer_only,tool_agent` 两组，约 15～20 分钟）：输出 `outputs/runs/<时间>-day11-answer-format-qwen3b-2wiki-static-rag-dense-rerank-validation`，日志 `/root/autodl-tmp/logs/answer_format_2wiki.log`
+**11.5 结论（2026-10-03，2Wiki 在线收尾）：在 2Wiki 上 agent 探测的收益缩到一半，"直接作答"的那部分基本没了；分差门控 + agent 探测追平了每题都探测。格式诊断反过来变成显著变差 → "B3 不改格式"两个数据集都成立。**
+- 分差门控（门槛 5.69，样本外）运行 `20261003-144150`：EM 0.379，− B3 +3.2 [+2.0, +4.6] 显著，和离线推算完全一致
+- agent 探测（每题都探测）运行 `20261003-144949`，拆解（`day11_agent_probe_breakdown`）：
 
-回来后先检查：`tmux ls`（`cascade2wiki` 不在了 = 跑完或被关机打断）；`tail -3 /root/autodl-tmp/logs/answer_format_2wiki.log` 最后一行是 `-> outputs/runs/...` 才算跑完；看 2、3 的输出目录里有没有 `metrics.json`。缺哪个就重跑哪个（先按恢复清单起 vLLM 8000；2 还要起 2Wiki 检索服务 8101，3 不需要检索服务）：
-```bash
-python -m evaluation.run_eval --config configs/qwen3b_2wiki_cascade_always_agent.yaml --split validation   # 2
-python -m experiments.day11_answer_format_probe --context-run outputs/runs/20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation \
-    --labels data/2wiki/v1/labels/validation.jsonl --arms user_answer_only,tool_agent                     # 3
-```
-被打断的运行留下的不完整目录删掉再重跑（没有 `metrics.json` 的就是不完整的）。
+  | 2Wiki（B3 0.346） | EM | − B3 | 探测 | 检索 | 输入 token |
+  |---|---|---|---|---|---|
+  | agent 探测，想搜就再搜（在线） | 0.390 | +4.4 [+1.5, +7.4] | 1.00 | 1.58 | 1437 |
+  | agent 探测，不再搜 | 0.367 | +2.1 [+0.0, +4.4] | 1.00 | 1.00 | 1261 |
+  | 分差门控 4.19 + agent 探测（门槛在 2Wiki 上选，样本内） | 0.391 | +4.5 [+3.0, +6.1] | 0.40 | 1.31 | 1071 |
+  | 分差门控 5.69 + agent 探测（样本外） | 0.378 | +3.1 [+1.9, +4.5] | 0.30 | 1.23 | 969 |
+  | 对照：分差门控 5.69 + rewrite 探测 | 0.379 | +3.2 [+2.0, +4.6] | 0.30 | 1.24 | 994 |
+
+  outcome 配对：escalated 468 题 126 → 144（赢 43 输 25，以组合 / 推理题为主）；answered 281 题 137 → 154（赢 48 输 31，147 题是比较题）；format_error 33 / duplicate 18 题不变
+- 拆分：+4.4 ≈ +2.1「直接作答」+ +2.3「再搜」；HotpotQA 是 +5.5 + +2.5 → 直接作答的收益没能跨数据集迁移，"再搜"的收益两边差不多
+- 和 HotpotQA 不同，这里分差门控和 agent 探测**基本互补**：门控 4.19 只探测 40% 的题就追平每题都探测（0.391 vs 0.390），因为 2Wiki 的收益主要来自"再搜"，正好是分差门控挑出来的那类题。样本外门槛 5.69 下，agent 探测和 rewrite 探测打平（0.378 vs 0.379）
+- 格式诊断运行 `20261003-152111`（800 题）："用户消息 × 只能作答"和 B3 800/800 逐字一致；"工具返回 × Agent"EM 0.304，**− B3 −4.25 [−7.5, −1.0]，显著变差**（64.5% 的题想搜被强制作答，格式错误 6.25%）
+- 对前沿的影响：样本外门槛下 rewrite / agent 两种探测在 2Wiki 上一样好，在 HotpotQA 上 agent 探测更好但多花约 30% token → 多 seed 时两种都跑
 
 **11.4 结论：agent 探测的 +8.0 ≈ +5.5「模型有把握时自己直接答」+ +2.5「真的再搜一次」；单纯换作答格式不显著 → B3 不改。**
 - 按 outcome 和 B3 同题配对：answered 92 题 40 → 51（赢 15 输 4，证据和 B3 逐字相同、召回都是 0.891）；escalated 91 题 35 → 40；format_error 14 / duplicate 3 题不变
@@ -81,14 +86,14 @@ python -m experiments.day11_answer_format_probe --context-run outputs/runs/20261
 
 **Day 11 下一步（按顺序）**：
 1. ~~拆 agent 探测 +8.0 的来源~~（11.4 完成，见本节开头）
-2. 2Wiki 在线收尾：确认上面 2、3 跑完后，拆 2Wiki 的 agent 探测（和 11.4 同一个口径，按题型看；2Wiki 标签里题型字段同样是 `type`）：
+2. ~~2Wiki 在线收尾~~（11.5 完成，见本节开头）。原计划：确认 2、3 跑完后，拆 2Wiki 的 agent 探测（和 11.4 同一个口径，按题型看；2Wiki 标签里题型字段同样是 `type`）：
    `python -m experiments.day11_agent_probe_breakdown --labels data/2wiki/v1/labels/validation.jsonl --b3 outputs/runs/20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation --agent outputs/runs/20261003-144949-qwen3b-2wiki-cascade-always-agent-validation --gap 4.19 5.69`
    重点看：agent 探测的收益在 2Wiki 上是否还是"直接作答"占大头；组合题（桥接实体在第一跳拿不到）上"再搜"是否占大头；格式诊断 tool_agent 组是否仍不显著（决定"B3 不改格式"在两个数据集上都成立）
 3. 多 seed：分差门控和 agent 探测各跑 3 个采样 seed（temperature 0.7），按 V2 口径（多数 seed 显著才算显著）。采样下离线推算不再精确，要在线跑
 4. 更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
 5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
 
-**服务状态（2026-10-03 15:05 断网前）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）、`cascade2wiki`（实验链）在跑；`retriever`（8100，HotpotQA）没起。用户可能设了定时关机：关机后 tmux 全部消失，按下面的恢复清单重启；做 HotpotQA 实验时要停掉 8101、起 8100。
+**服务状态（2026-10-03 恢复会话时）**：机器重启过，tmux 和所有服务都没在跑。多 seed 前按恢复清单起 vLLM（8000）和检索服务（HotpotQA 8100 / 2Wiki 8101）。
 
 **Day 10.4 完成（2026-10-02）：2Wiki 上证据条件改写的收益更大、显著（EM +4.0、组合题 +14.0）；只看问题的静态拆解没用；"拒绝再搜"信号在 2Wiki 上 385 题零翻转。**
 
@@ -290,7 +295,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 11.4 拆 agent 探测 +8.0 的来源：outcome 分组配对 + 作答格式 2×2 诊断（`experiments/day11_answer_format_probe.py`）+ 离线推算 agent 探测变体（结果见"当前位置"）
   - 诊断脚本不连检索服务：证据直接取 B3 轨迹里存的检索结果（`Context.model_validate`），"用户消息 × 只能作答"组直接调 `run_episode`，必须和 B3 逐字一致才算复用没走样（200/200）
   - Agent 系统提示下模型想搜：回"预算用完"的报错（和 Agent 循环同一条路径）再让它作答；格式错误照常回报错重试，最多 max_turns 轮
-- [ ] 11.5 2Wiki 在线：分差门控 ✅（在线和离线推算一致，+3.2 显著）；agent 探测、格式诊断断网时在跑，回来先确认跑完（见"当前位置"）
+- [x] 11.5 2Wiki 在线：分差门控、agent 探测 + 拆解、格式诊断（结果见"当前位置"）
 - [ ] 11.6 多 seed 稳健性
 - [ ] 11.7 文档：学习笔记、项目全景、计划文件
 
