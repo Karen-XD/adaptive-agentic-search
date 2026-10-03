@@ -9,9 +9,9 @@
 
 **⏸ Day 11 进行中（2026-10-03 15:05 因断网暂停，下次从"Day 11 下一步"第 2 条接着做）：cascade 代码、离线推算、HotpotQA 在线、agent 探测 +8.0 的拆解（11.4）已完成；2Wiki 在线（11.5）断网时还在 tmux 里跑，多 seed、文档还没做。最新 commit 见 git log（cascade 代码在 `ccc54ad`）。**
 
-**断网时留在服务器上跑的任务（tmux `cascade2wiki`，预计 15:30 前全部结束）**：
+**断网时留在服务器上跑的任务（tmux `cascade2wiki`，15:04 时只剩第 3 项，50/800，预计 15:25 左右结束）**：
 1. ✅ 2Wiki 分差门控（门槛 5.69，样本外）：运行 `20261003-144150-qwen3b-2wiki-cascade-gap-validation`。**EM 0.379，− B3 +3.2 [+2.0, +4.6] 显著**；探测 30%、再搜 24%、检索 1.24 次、输入 994 token、p50 / p95 326 / 1490ms → 和离线推算（0.379 / 30% / 994）完全一致，2Wiki 上离线推算也是精确的
-2. ⏳ 2Wiki agent 探测（每题都探测）：运行 `20261003-144949-qwen3b-2wiki-cascade-always-agent-validation`，断网时 780/800
+2. ✅ 2Wiki agent 探测（每题都探测）：运行 `20261003-144949-qwen3b-2wiki-cascade-always-agent-validation`。EM 0.390（B3 0.346，配对区间还没算）；再搜 58.5%、输入 1437 token；outcome：escalated 468 / answered 281 / format_error 33 / duplicate 18。和 HotpotQA 比，再搜的比例高得多（58.5% vs 45.5%），符合 2Wiki 组合题需要桥接实体
 3. ⏳ 2Wiki 格式诊断（`user_answer_only,tool_agent` 两组，约 15～20 分钟）：输出 `outputs/runs/<时间>-day11-answer-format-qwen3b-2wiki-static-rag-dense-rerank-validation`，日志 `/root/autodl-tmp/logs/answer_format_2wiki.log`
 
 回来后先检查：`tmux ls`（`cascade2wiki` 不在了 = 跑完或被关机打断）；`tail -3 /root/autodl-tmp/logs/answer_format_2wiki.log` 最后一行是 `-> outputs/runs/...` 才算跑完；看 2、3 的输出目录里有没有 `metrics.json`。缺哪个就重跑哪个（先按恢复清单起 vLLM 8000；2 还要起 2Wiki 检索服务 8101，3 不需要检索服务）：
