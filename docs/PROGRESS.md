@@ -7,7 +7,20 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**▶ Day 11 进行中（2026-10-03）：按需升级（cascade）的代码、离线推算、HotpotQA 在线验证、agent 探测 +8.0 的拆解（11.4）已完成；2Wiki 在线（11.5）在跑，多 seed、文档还没做。最新 commit 见 git log（cascade 代码在 `ccc54ad`）。**
+**⏸ Day 11 进行中（2026-10-03 15:05 因断网暂停，下次从"Day 11 下一步"第 2 条接着做）：cascade 代码、离线推算、HotpotQA 在线、agent 探测 +8.0 的拆解（11.4）已完成；2Wiki 在线（11.5）断网时还在 tmux 里跑，多 seed、文档还没做。最新 commit 见 git log（cascade 代码在 `ccc54ad`）。**
+
+**断网时留在服务器上跑的任务（tmux `cascade2wiki`，预计 15:30 前全部结束）**：
+1. ✅ 2Wiki 分差门控（门槛 5.69，样本外）：运行 `20261003-144150-qwen3b-2wiki-cascade-gap-validation`。**EM 0.379，− B3 +3.2 [+2.0, +4.6] 显著**；探测 30%、再搜 24%、检索 1.24 次、输入 994 token、p50 / p95 326 / 1490ms → 和离线推算（0.379 / 30% / 994）完全一致，2Wiki 上离线推算也是精确的
+2. ⏳ 2Wiki agent 探测（每题都探测）：运行 `20261003-144949-qwen3b-2wiki-cascade-always-agent-validation`，断网时 780/800
+3. ⏳ 2Wiki 格式诊断（`user_answer_only,tool_agent` 两组，约 15～20 分钟）：输出 `outputs/runs/<时间>-day11-answer-format-qwen3b-2wiki-static-rag-dense-rerank-validation`，日志 `/root/autodl-tmp/logs/answer_format_2wiki.log`
+
+回来后先检查：`tmux ls`（`cascade2wiki` 不在了 = 跑完或被关机打断）；`tail -3 /root/autodl-tmp/logs/answer_format_2wiki.log` 最后一行是 `-> outputs/runs/...` 才算跑完；看 2、3 的输出目录里有没有 `metrics.json`。缺哪个就重跑哪个（先按恢复清单起 vLLM 8000；2 还要起 2Wiki 检索服务 8101，3 不需要检索服务）：
+```bash
+python -m evaluation.run_eval --config configs/qwen3b_2wiki_cascade_always_agent.yaml --split validation   # 2
+python -m experiments.day11_answer_format_probe --context-run outputs/runs/20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation \
+    --labels data/2wiki/v1/labels/validation.jsonl --arms user_answer_only,tool_agent                     # 3
+```
+被打断的运行留下的不完整目录删掉再重跑（没有 `metrics.json` 的就是不完整的）。
 
 **11.4 结论：agent 探测的 +8.0 ≈ +5.5「模型有把握时自己直接答」+ +2.5「真的再搜一次」；单纯换作答格式不显著 → B3 不改。**
 - 按 outcome 和 B3 同题配对：answered 92 题 40 → 51（赢 15 输 4，证据和 B3 逐字相同、召回都是 0.891）；escalated 91 题 35 → 40；format_error 14 / duplicate 3 题不变
@@ -68,12 +81,14 @@
 
 **Day 11 下一步（按顺序）**：
 1. ~~拆 agent 探测 +8.0 的来源~~（11.4 完成，见本节开头）
-2. 2Wiki 在线（2026-10-03 已启动，tmux `cascade2wiki`，日志 `/root/autodl-tmp/logs/cascade_2wiki.log`）：`run_cascade.sh 2wiki`（分差门控 5.69 + agent 探测）跑完后接着跑 2Wiki 的格式诊断（`user_answer_only,tool_agent` 两组，日志 `answer_format_2wiki.log`）。跑完按 11.4 的口径拆 2Wiki 的 agent 探测（outcome 分组配对、"不再搜"变体、分差门控 + agent 探测）
+2. 2Wiki 在线收尾：确认上面 2、3 跑完后，拆 2Wiki 的 agent 探测（和 11.4 同一个口径，按题型看；2Wiki 标签里题型字段同样是 `type`）：
+   `python -m experiments.day11_agent_probe_breakdown --labels data/2wiki/v1/labels/validation.jsonl --b3 outputs/runs/20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation --agent outputs/runs/20261003-144949-qwen3b-2wiki-cascade-always-agent-validation --gap 4.19 5.69`
+   重点看：agent 探测的收益在 2Wiki 上是否还是"直接作答"占大头；组合题（桥接实体在第一跳拿不到）上"再搜"是否占大头；格式诊断 tool_agent 组是否仍不显著（决定"B3 不改格式"在两个数据集上都成立）
 3. 多 seed：分差门控和 agent 探测各跑 3 个采样 seed（temperature 0.7），按 V2 口径（多数 seed 显著才算显著）。采样下离线推算不再精确，要在线跑
 4. 更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
 5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
 
-**服务状态（2026-10-03）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）在跑；`retriever`（8100，HotpotQA）没起（11.4 不需要检索服务，2Wiki 期间三个服务一起显存太紧）。重启服务器后 tmux 全部消失，按下面的恢复清单重启。
+**服务状态（2026-10-03 15:05 断网前）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）、`cascade2wiki`（实验链）在跑；`retriever`（8100，HotpotQA）没起。用户可能设了定时关机：关机后 tmux 全部消失，按下面的恢复清单重启；做 HotpotQA 实验时要停掉 8101、起 8100。
 
 **Day 10.4 完成（2026-10-02）：2Wiki 上证据条件改写的收益更大、显著（EM +4.0、组合题 +14.0）；只看问题的静态拆解没用；"拒绝再搜"信号在 2Wiki 上 385 题零翻转。**
 
@@ -275,7 +290,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 11.4 拆 agent 探测 +8.0 的来源：outcome 分组配对 + 作答格式 2×2 诊断（`experiments/day11_answer_format_probe.py`）+ 离线推算 agent 探测变体（结果见"当前位置"）
   - 诊断脚本不连检索服务：证据直接取 B3 轨迹里存的检索结果（`Context.model_validate`），"用户消息 × 只能作答"组直接调 `run_episode`，必须和 B3 逐字一致才算复用没走样（200/200）
   - Agent 系统提示下模型想搜：回"预算用完"的报错（和 Agent 循环同一条路径）再让它作答；格式错误照常回报错重试，最多 max_turns 轮
-- [ ] 11.5 2Wiki 在线（分差门控、agent 探测）
+- [ ] 11.5 2Wiki 在线：分差门控 ✅（在线和离线推算一致，+3.2 显著）；agent 探测、格式诊断断网时在跑，回来先确认跑完（见"当前位置"）
 - [ ] 11.6 多 seed 稳健性
 - [ ] 11.7 文档：学习笔记、项目全景、计划文件
 
