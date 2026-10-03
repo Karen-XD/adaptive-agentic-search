@@ -7,7 +7,7 @@
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**Day 11 进行中：cascade 代码、离线推算、HotpotQA 在线、agent 探测拆解（11.4）、2Wiki 在线收尾（11.5）、多 seed（11.6）已完成；下一步文档（11.7）。cascade 代码在 `ccc54ad`。**
+**Day 11 进行中：cascade 代码、离线推算、HotpotQA 在线、agent 探测拆解（11.4）、2Wiki 在线收尾（11.5）、多 seed（11.6）、文档（11.7）已完成；下一步决定 Policy 接口 / BudgetManager 要不要单独抽象，然后进 Day 12 主实验。cascade 代码在 `ccc54ad`。**
 
 **11.6 结论（2026-10-03，多 seed，temperature 0.7，和同 seed 的 B3 配对，`python -m experiments.day11_seed_summary`）：两种升级都多数 seed 显著，只有"分差门控 @ HotpotQA"一格不稳（3 个 seed 都为正，但都不显著）。**
 
@@ -103,7 +103,7 @@ B3 seed EM：HotpotQA 0.395 / 0.405 / 0.430（Day 9 已有运行），2Wiki 0.35
    `python -m experiments.day11_agent_probe_breakdown --labels data/2wiki/v1/labels/validation.jsonl --b3 outputs/runs/20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation --agent outputs/runs/20261003-144949-qwen3b-2wiki-cascade-always-agent-validation --gap 4.19 5.69`
    重点看：agent 探测的收益在 2Wiki 上是否还是"直接作答"占大头；组合题（桥接实体在第一跳拿不到）上"再搜"是否占大头；格式诊断 tool_agent 组是否仍不显著（决定"B3 不改格式"在两个数据集上都成立）
 3. ~~多 seed~~（11.6 完成，见本节开头）。原计划：分差门控和 agent 探测各跑 3 个采样 seed（temperature 0.7），按 V2 口径（多数 seed 显著才算显著）。采样下离线推算不再精确，要在线跑
-4. 更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
+4. ~~文档~~（11.7 完成）：更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
 5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
 
 **服务状态（2026-10-03 23:30）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）在跑；HotpotQA 的 `retriever`（8100）已停。
@@ -310,7 +310,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
   - Agent 系统提示下模型想搜：回"预算用完"的报错（和 Agent 循环同一条路径）再让它作答；格式错误照常回报错重试，最多 max_turns 轮
 - [x] 11.5 2Wiki 在线：分差门控、agent 探测 + 拆解、格式诊断（结果见"当前位置"）
 - [x] 11.6 多 seed 稳健性（结果见"当前位置"；和同 seed 的 B3 配对，`experiments/day11_seed_summary.py`）
-- [ ] 11.7 文档：学习笔记、项目全景、计划文件
+- [x] 11.7 文档：学习笔记（门控 / 离线推算 / 多 seed + 2 道面试题）、项目全景（Day 11 节 + 一分钟版）、计划文件（Day 11 实际进展）
 
 ## Day 10 子步骤
 

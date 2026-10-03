@@ -411,6 +411,8 @@ B4 的初始启发式可以是短实体/型号词 → BM25、较长语义表达 
 
 **验收**：更换 Policy 不修改 Agent Loop、Retriever Gateway 和评估器。验证 Rule Policy 是有竞争力的廉价对照。
 
+> **实际进展（2026-10-03）**：Day 9～10 的结论把 V2 主线改成"按需升级"，Day 11 先落地了核心动作"升级 / 不升级"：`agent/cascade.py`，其中门控 = Rule Policy（重排分差，阈值跨数据集选），agent 探测 = LLM Policy（模型自选作答或再搜），`gate=never` = Fixed Policy（B3）。三种策略共用同一个 Agent Loop、检索服务和评测器，满足上面的验收精神。多 seed 结果：分差门控 2Wiki 3/3 显著、HotpotQA 0/3（都为正）；agent 探测两个数据集都是 2/3。统一 `BudgetManager`（rerank 次数 / token 预算分开设）还没单独抽象，视 Day 12 需要再做。详见 `docs/PROGRESS.md`。
+
 ## Day 12｜完整自适应策略主实验
 
 运行 B3、B4、Ours，保持**相同测试题、索引、模型生成配置和预算**。额外做：
