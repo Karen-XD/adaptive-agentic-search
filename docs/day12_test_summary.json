@@ -1,0 +1,235 @@
+{
+  "hotpotqa": {
+    "rows": {
+      "B3": {
+        "run": "20261004-141808-qwen3b-static-rag-dense-rerank-test",
+        "em": 0.36,
+        "f1": 0.4717347985347987,
+        "evidence_recall": 0.785,
+        "search_calls": 1.0,
+        "prompt_tokens": 588.398,
+        "latency_p50": 312.03149259090424,
+        "latency_p95": 371.307160705328,
+        "em_minus_b3": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "probe_rate": null,
+        "escalation_rate": null
+      },
+      "全量多轮 Agent": {
+        "run": "20261004-144415-qwen3b-agent-dense-rerank-test",
+        "em": 0.378,
+        "f1": 0.4930431749537015,
+        "evidence_recall": 0.783,
+        "search_calls": 1.794,
+        "prompt_tokens": 2499.882,
+        "latency_p50": 1598.1776490807533,
+        "latency_p95": 3884.580074623227,
+        "em_minus_b3": [
+          0.018,
+          -0.026,
+          0.06
+        ],
+        "probe_rate": null,
+        "escalation_rate": null
+      },
+      "cascade 每题探测（rewrite）": {
+        "run": "20261004-143444-qwen3b-cascade-always-test",
+        "em": 0.39,
+        "f1": 0.5105347985347987,
+        "evidence_recall": 0.837,
+        "search_calls": 1.466,
+        "prompt_tokens": 1336.402,
+        "latency_p50": 1093.3080650866032,
+        "latency_p95": 1805.2650179713962,
+        "em_minus_b3": [
+          0.03,
+          0.008,
+          0.054
+        ],
+        "probe_rate": 1.0,
+        "escalation_rate": 0.466
+      },
+      "cascade 分差门控（rewrite）": {
+        "run": "20261004-142049-qwen3b-cascade-gap-test",
+        "em": 0.386,
+        "f1": 0.5016300366300368,
+        "evidence_recall": 0.827,
+        "search_calls": 1.25,
+        "prompt_tokens": 909.06,
+        "latency_p50": 331.3422203063965,
+        "latency_p95": 1543.2481009513137,
+        "em_minus_b3": [
+          0.026,
+          0.01,
+          0.044
+        ],
+        "probe_rate": 0.392,
+        "escalation_rate": 0.25
+      },
+      "cascade 每题 agent 探测": {
+        "run": "20261004-142621-qwen3b-cascade-always-agent-test",
+        "em": 0.426,
+        "f1": 0.5522683760683763,
+        "evidence_recall": 0.838,
+        "search_calls": 1.452,
+        "prompt_tokens": 1123.11,
+        "latency_p50": 985.5713658034801,
+        "latency_p95": 1610.9741602092981,
+        "em_minus_b3": [
+          0.066,
+          0.03,
+          0.102
+        ],
+        "probe_rate": 1.0,
+        "escalation_rate": 0.452
+      },
+      "分差门控 4.19 + agent 探测（离线）": {
+        "em": 0.392,
+        "em_minus_b3": [
+          0.032,
+          0.01,
+          0.054
+        ],
+        "probe_rate": 0.392,
+        "searches": 1.226,
+        "prompt_tokens": 847.778
+      }
+    },
+    "by_type": {}
+  },
+  "2wiki": {
+    "rows": {
+      "B3": {
+        "run": "20261004-131014-qwen3b-2wiki-static-rag-dense-rerank-test",
+        "em": 0.29875,
+        "f1": 0.37823270811314286,
+        "evidence_recall": 0.6578125,
+        "search_calls": 1.0,
+        "prompt_tokens": 679.06625,
+        "latency_p50": 315.83260372281075,
+        "latency_p95": 375.25101378560066,
+        "em_minus_b3": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "probe_rate": null,
+        "escalation_rate": null
+      },
+      "全量多轮 Agent": {
+        "run": "20261004-135157-qwen3b-2wiki-agent-dense-rerank-test",
+        "em": 0.3125,
+        "f1": 0.4012455390810172,
+        "evidence_recall": 0.74375,
+        "search_calls": 1.88625,
+        "prompt_tokens": 3063.7375,
+        "latency_p50": 1788.189273327589,
+        "latency_p95": 3675.358448922633,
+        "em_minus_b3": [
+          0.01375,
+          -0.02375,
+          0.05125
+        ],
+        "probe_rate": null,
+        "escalation_rate": null
+      },
+      "cascade 每题探测（rewrite）": {
+        "run": "20261004-133614-qwen3b-2wiki-cascade-always-test",
+        "em": 0.335,
+        "f1": 0.4192336859364891,
+        "evidence_recall": 0.753125,
+        "search_calls": 1.48875,
+        "prompt_tokens": 1560.97375,
+        "latency_p50": 1127.7574934065342,
+        "latency_p95": 1720.862678438425,
+        "em_minus_b3": [
+          0.03625,
+          0.01875,
+          0.05375
+        ],
+        "probe_rate": 1.0,
+        "escalation_rate": 0.48875
+      },
+      "cascade 分差门控（rewrite）": {
+        "run": "20261004-131433-qwen3b-2wiki-cascade-gap-test",
+        "em": 0.32625,
+        "f1": 0.4080828020981052,
+        "evidence_recall": 0.710625,
+        "search_calls": 1.23875,
+        "prompt_tokens": 987.885,
+        "latency_p50": 333.56742560863495,
+        "latency_p95": 1527.3713365197182,
+        "em_minus_b3": [
+          0.0275,
+          0.015,
+          0.04125
+        ],
+        "probe_rate": 0.2975,
+        "escalation_rate": 0.23875
+      },
+      "cascade 每题 agent 探测": {
+        "run": "20261004-132242-qwen3b-2wiki-cascade-always-agent-test",
+        "em": 0.37,
+        "f1": 0.45566176184926177,
+        "evidence_recall": 0.76,
+        "search_calls": 1.5575,
+        "prompt_tokens": 1421.07125,
+        "latency_p50": 992.5499968230724,
+        "latency_p95": 1582.6294377446172,
+        "em_minus_b3": [
+          0.07125,
+          0.04375,
+          0.09875
+        ],
+        "probe_rate": 1.0,
+        "escalation_rate": 0.5575
+      },
+      "分差门控 5.69 + agent 探测（离线）": {
+        "em": 0.32625,
+        "em_minus_b3": [
+          0.0275,
+          0.015,
+          0.04
+        ],
+        "probe_rate": 0.2975,
+        "searches": 1.21875,
+        "prompt_tokens": 958.24125
+      }
+    },
+    "by_type": {
+      "B3": {
+        "bridge_comparison": 0.495,
+        "comparison": 0.515,
+        "compositional": 0.12,
+        "inference": 0.065
+      },
+      "全量多轮 Agent": {
+        "bridge_comparison": 0.345,
+        "comparison": 0.505,
+        "compositional": 0.28,
+        "inference": 0.12
+      },
+      "cascade 每题探测（rewrite）": {
+        "bridge_comparison": 0.51,
+        "comparison": 0.51,
+        "compositional": 0.2,
+        "inference": 0.12
+      },
+      "cascade 分差门控（rewrite）": {
+        "bridge_comparison": 0.495,
+        "comparison": 0.515,
+        "compositional": 0.195,
+        "inference": 0.1
+      },
+      "cascade 每题 agent 探测": {
+        "bridge_comparison": 0.515,
+        "comparison": 0.635,
+        "compositional": 0.22,
+        "inference": 0.11
+      }
+    }
+  }
+}
