@@ -6,7 +6,8 @@
   validation  每类 200，端到端对比（Day 10.4 起）；提示词不在这里调
   debug       每类 25，调提示词、看输出
 2Wiki 的 inference 题在 train 里只占 2.6%，按自然分布抽几乎抽不到；分层后按题型报告，不报一个混合平均。
-官方 dev 留作以后的 test，现在不碰。抽样顺序固定（先 analysis，再 validation、debug），加新划分不改变已有划分。
+  test        每类 200，从官方 dev 抽（Day 12 主实验，只跑一次，带 --final）
+抽样顺序固定（先 analysis，再 validation、debug，最后 test），每个后加的划分用独立的随机数生成器，加新划分不改变已有划分。
 标签里额外保存 evidences（实体, 关系, 值）三元组：只给评测侧分析用（构造理想子查询），不进 prompt。
 
 用法：python -m data_prep.prepare_2wiki
@@ -66,6 +67,7 @@ def main() -> None:
     ap.add_argument("--n_per_type", type=int, default=500)
     ap.add_argument("--n_validation_per_type", type=int, default=200)
     ap.add_argument("--n_debug_per_type", type=int, default=25)
+    ap.add_argument("--n_test_per_type", type=int, default=200)
     ap.add_argument("--seed", type=int, default=20261002)
     args = ap.parse_args()
     raw, out = ROOT / args.raw, ROOT / args.out
@@ -86,22 +88,29 @@ def main() -> None:
         ids = rng2.sample(sorted(rest.loc[rest.type == t, "_id"]), args.n_validation_per_type + args.n_debug_per_type)
         extra["validation"] += ids[:args.n_validation_per_type]
         extra["debug"] += ids[args.n_validation_per_type:]
+    # test 从官方 dev 抽（和 train 天然不重叠），同样按题型分层
+    rng3 = random.Random(args.seed + 2)
+    test_ids = []
+    for t in sorted(dev.type.unique()):
+        test_ids += rng3.sample(sorted(dev.loc[dev.type == t, "_id"]), args.n_test_per_type)
     known = {d["doc_id"] for d in corpus}
-    by_id = train.set_index("_id")
+    by_id = {"train": train.set_index("_id"), "dev": dev.set_index("_id")}
     stats = {}
-    for name, ids in (("analysis", picked), *extra.items()):
-        questions, labels = to_split(by_id.loc[ids].reset_index())
+    for name, ids, src in (("analysis", picked, "train"), *((k, v, "train") for k, v in extra.items()),
+                           ("test", test_ids, "dev")):
+        questions, labels = to_split(by_id[src].loc[ids].reset_index())
         missing = sum(g not in known for l in labels for g in l["gold_doc_ids"])
         if missing:
             raise SystemExit(f"{name}: {missing} gold doc ids not in corpus")
         write_jsonl(out / "questions" / f"{name}.jsonl", questions)
         write_jsonl(out / "labels" / f"{name}.jsonl", labels)
-        stats[name] = {"num_questions": len(labels), "source": "train", "sampling": "stratified by type",
+        stats[name] = {"num_questions": len(labels), "source": src, "sampling": "stratified by type",
                        "type": dict(Counter(l["type"] for l in labels)),
                        "num_gold": dict(Counter(len(l["gold_doc_ids"]) for l in labels))}
-    split_ids = {name: set(ids) for name, ids in (("analysis", picked), *extra.items())}
+    split_ids = {name: set(ids) for name, ids in (("analysis", picked), *extra.items(), ("test", test_ids))}
     assert not (split_ids["analysis"] & split_ids["validation"] or split_ids["analysis"] & split_ids["debug"]
                 or split_ids["validation"] & split_ids["debug"]), "splits overlap"
+    assert not split_ids["test"] & set(train["_id"]), "test overlaps train"
 
     commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     manifest = {

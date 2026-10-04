@@ -1,0 +1,4 @@
+# 2Wiki 全量多轮 Agent（Day 12 对照）：除数据和检索服务外与 configs/qwen3b_agent_dense_rerank.yaml 完全相同
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-agent-dense-rerank
+method: agent

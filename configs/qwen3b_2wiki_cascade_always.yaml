@@ -1,0 +1,6 @@
+# 2Wiki 按需升级：每题都探测（证据改写提示词），见 configs/qwen3b_cascade_always.yaml；答案应和 two_hop_evidence 逐题相同
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-cascade-always
+method: cascade
+budget: {max_search_calls: 2}
+cascade: {gate: always, probe: rewrite}
