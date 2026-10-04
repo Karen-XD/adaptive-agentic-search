@@ -4,6 +4,8 @@
 
 ## 当前位置
 
+> **⏸ 2026-10-04 18:00 关机。下次开始先看本节下方的"关机前状态"（下次接着做的 3 步 + 服务状态），再按"服务器重启后的恢复清单"起服务。**
+
 **✅ Day 13 商品搜索后端跑通（2026-10-04）：ESCI 数据、商品语料、nDCG@10 评测器、固定候选池（Setting A）上 5 种排序基线；validation 上 Dense 最好，混合检索反而略差，重排不显著。**
 
 - 数据（`data_prep/prepare_esci.py` → `data/esci/v1/`）：Amazon ESCI，只取 `product_locale=us`、`small_version=1`。官方 train 20888 条查询 / test 8956 条，互不重叠。抽 validation 400、debug 25（都来自官方 train，互不重叠）、test 400（来自官方 test，Day 15 才跑）。每条查询平均约 21 个已标注候选商品；商品语料 482105 个（标题 + 品牌 + 要点 + 描述）
@@ -174,7 +176,16 @@ B3 seed EM：HotpotQA 0.395 / 0.405 / 0.430（Day 9 已有运行），2Wiki 0.35
 4. ~~文档~~（11.7 完成）：更新 `docs/LEARNING_NOTES.md`（级联 / 门控 / 离线推算的原理 + 面试问答）、`docs/PROJECT_OVERVIEW.md`、计划文件的 Day 11 部分
 5. 之后：计划里 Day 11 的统一 Policy 接口 / BudgetManager（cascade 已经覆盖"升级 / 不升级"这个核心动作，看是否还需要单独抽象），再进 Day 12 主实验
 
-**服务状态（2026-10-03 23:30）**：tmux `vllm`（8000）、`retriever_2wiki`（8101）在跑；HotpotQA 的 `retriever`（8100）已停。
+**⏸ 关机前状态（2026-10-04 18:00）**：Day 12（QA test 主实验 + `docs/V2_REPORT.md`）和 Day 13 的 Setting A（ESCI 数据、评测器、5 种排序基线）都已完成，代码和文档全部 commit + push，工作区干净。
+
+**下次接着做（按顺序）**：
+1. Day 13 收尾二选一：① **商品域的按需升级**（把 QA 的分差门控搬过来：Dense 前 1、2 名分差 → 决定要不要重排 / 让模型判断，衔接 V2 主线）；② **Setting B 全库检索**（48 万商品建索引，报已标注 E 商品的覆盖率）
+2. Day 14 Stop Point 2：QA 正式对比表 + 工具成本（含改写 / 重排的 token 和耗时）→ 打标签 `v2-adaptive-qa` 冻结 QA
+3. Day 15 商品主实验：Setting A test（400 条，`--final`）+ 动态路由，和 QA 结果**分开呈现**
+
+**判断用的一句话**：Setting A 上随机排序就有 nDCG@10 0.746，所有方法挤在 0.83～0.85 → 商品域的可提升空间小，策略的价值更可能在**成本侧**（少调模型 / 少重排）而不是质量侧。
+
+**服务状态**：tmux 只剩 `vllm`（8000）。检索服务（8100 / 8101）都已停，重跑 QA 实验前按下面的恢复清单起。ESCI 相关实验不需要检索服务（候选池来自 labels 文件，BM25 索引是离线加载的）。
 
 **Day 10.4 完成（2026-10-02）：2Wiki 上证据条件改写的收益更大、显著（EM +4.0、组合题 +14.0）；只看问题的静态拆解没用；"拒绝再搜"信号在 2Wiki 上 385 题零翻转。**
 
@@ -367,6 +378,19 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 13 子步骤
+
+- [x] 13.1 下载官方 ESCI（`shopping_queries_dataset_examples/products`），只取 `product_locale=us` + `small_version=1`
+- [x] 13.2 `data_prep/prepare_esci.py`：
+  - 划分：validation 400 / debug 25（官方 train 抽样，互不重叠）、test 400（官方 test）；官方 train 20888 / test 8956 条查询，**query_id 零重叠**
+  - 语料：482105 个商品（标题 + 品牌 + 要点 + 描述），`doc_id = es-<md5(product_id)[:12]>`；`corpus.jsonl` 只含商品文本，**ESCI 标签不进语料、不进 prompt**
+  - labels 里存候选商品 + 标签（只给评测器）；增益映射 E=3/S=2/C=1/I=0 写进 manifest，标注为"本项目人为设定"
+- [x] 13.3 `evaluation/commerce_metrics.py`：nDCG@k、E 的 Recall@k、MRR、C=0 的敏感性口径；失败查询计 0 分留在分母里。测试 6 个（手算 nDCG、位置敏感性、增益映射影响）
+- [x] 13.4 建 `indexes/esci_v1_bm25`（48 万商品，109 秒）
+- [x] 13.5 `experiments/day13_commerce_setting_a.py`：Setting A 固定候选池上 6 种排序（随机 / 按标签完美排序的诊断上限 / BM25 / Dense / Hybrid / Hybrid + 重排），输出 `metrics.json` + `per_query.jsonl`；跑 test 要加 `--final`；运行记录 commit 和 config
+- [x] 13.6 validation 400 条查询：Dense 最好（0.849），Hybrid 反而显著更差（−0.7）→ **等权融合被弱的一路拖累，跨领域复现**；重排在商品上不显著（+0.8）→ **QA 上重排 +10 点的结论不能外推**（结果见"当前位置"）
+- [ ] 13.7 商品域按需升级 / Setting B 全库检索（下次接着做）
 
 ## Day 12 子步骤
 
@@ -608,6 +632,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 语料池 + 划分 + 清单（270MB） | `data/hotpotqa/v1/` | `python -m data_prep.prepare_hotpot` |
 | BM25 索引（449MB） | `indexes/hotpot_pool_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/hotpotqa/v1/corpus.jsonl --index indexes/hotpot_pool_v1_bm25` |
 | Qwen2.5-3B-Instruct（6.17GB） | `/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct/` | `bash /root/Search-R1/download_model_modelscope.sh`（ModelScope + aria2c，约 5 分钟） |
+| ESCI 原始数据（1.1GB） | `data/raw/esci/` | 官方仓库 `amazon-science/esci-data` 的 `shopping_queries_dataset_{examples,products}.parquet`（examples sha256 `4a735b69…`、products `25124442…`）。`sources.parquet` 官方就是 0 字节，跳过；products 有 1.1GB，curl 断了就 `-C -` 续传 |
+| ESCI 商品语料 + 划分（582MB） | `data/esci/v1/` | `python -m data_prep.prepare_esci`（validation 400 / debug 25 来自官方 train，test 400 来自官方 test） |
+| ESCI BM25 索引（907MB） | `indexes/esci_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/esci/v1/corpus.jsonl --index indexes/esci_v1_bm25`（48 万商品，约 110 秒） |
 
 ## Day 1 子步骤
 
