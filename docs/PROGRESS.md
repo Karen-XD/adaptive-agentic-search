@@ -39,6 +39,8 @@
 
 脚本：`experiments/run_day12_test.sh`（跑）、`experiments/day12_test_summary.py`（汇总，输出 `outputs/day12_test_summary.json`）。
 
+**V2 报告：`docs/V2_REPORT.md`**（结论、框架图、test 主表、预期对照、按题型归因、6 个案例、能说 / 不能说、面试一分钟版）。
+
 
 
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
@@ -342,6 +344,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 12.2 补齐缺的配置：`qwen3b_2wiki_agent_dense_rerank.yaml`（2Wiki 全量多轮 Agent）、`qwen3b_2wiki_cascade_always.yaml`（每题探测，用于离线推算）
 - [x] 12.3 上 test 前检查（validation）：① cascade 每题探测和 Day 10 两跳运行答案 799/800 一致（唯一不同的那题是探测时原样重搜原问题 → 按设计不再搜第二次，两边都答错）；② 2Wiki 全量 Agent EM +2.0 不显著、token 4.2 倍，和 HotpotQA 一致
 - [x] 12.4 预先登记 `docs/DAY12_PREREG.md`（组、门槛、判定、规则），commit `8e23cde` 之后才跑 test
+- [x] 12.6 V2 报告 `docs/V2_REPORT.md`；案例从 test 轨迹挑（分差门控修组合题 / agent 探测修比较题 / 全量 Agent 弄坏桥接比较题）。全量 Agent 在桥接比较题上 B3 对、它错的 57 题：28 题选了另一个选项、28 题答案不是两个选项之一（问电影答导演）
 - [x] 12.5 test 主实验：`experiments/run_day12_test.sh`，两个数据集各 5 组、每组只跑一次（贪心 seed 0），10 个运行全部 `valid=true`；汇总 `experiments/day12_test_summary.py` → `outputs/day12_test_summary.json`（结果见"当前位置"）
 
 ## Day 11 子步骤
