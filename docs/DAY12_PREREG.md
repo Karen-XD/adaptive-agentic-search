@@ -41,3 +41,16 @@ test 结果出来后不改门槛、提示词、配置，不挑组；全部组都
 - 每组在 test 上只跑一次。只有基础设施故障（服务挂掉、`valid=false`）才允许重跑，重跑要在 PROGRESS 里记原因
 - 多 seed 只在 validation 上做（已完成，Day 11.6），test 只跑贪心
 - 2Wiki 全量 Agent 在跑 test 前先在 validation 上跑一次（Day 12 新增的配置，确认能正常跑完）
+
+## 补充（2026-10-04，Day 14，跑之前写好并 commit）
+
+Stop Point 2 要求 test 上有 B0 / B1 / B2 的正式对比，Day 12 主实验没跑这三组，现在补上：
+
+| 组 | HotpotQA 配置 | 2Wiki 配置 |
+|---|---|---|
+| B0 不检索 | `qwen3b_direct` | `qwen3b_2wiki_direct`（新建，只换数据） |
+| B1 BM25 搜一次 | `qwen3b_static_rag` | `qwen3b_2wiki_static_rag`（新建，只换数据和检索端口） |
+| B2 BM25 多轮 Agent | `qwen3b_agent` | `qwen3b_2wiki_agent`（新建，只换数据和检索端口） |
+
+- 这三组是 V1 的弱基线，HotpotQA 配置从 V1（`v1-baseline`）起没有改过；**补跑在主实验之后，不参与任何门槛、提示词或方法选择**，只用来把对比表补全
+- 同样贪心、每组只跑一次；预期（来自 V1 / validation）：B0 远低于其余各组；B1 < B3（重排 + Dense 的价值）；B2 和 B1 的 EM 差不显著、成本约 4 倍

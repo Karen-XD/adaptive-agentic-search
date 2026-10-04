@@ -1,0 +1,6 @@
+# 2Wiki B0：不检索直接作答。除数据外与 configs/qwen3b_direct.yaml 完全相同（Day 14 补齐基线）
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-direct
+method: direct
+retrieval: null
+budget: {max_search_calls: 0}

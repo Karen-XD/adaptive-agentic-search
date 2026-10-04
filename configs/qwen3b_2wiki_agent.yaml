@@ -1,0 +1,5 @@
+# 2Wiki B2：BM25 多轮 Agent、不重排。除数据和检索服务端口外与 configs/qwen3b_agent.yaml 完全相同（Day 14 补齐基线）
+extends: qwen3b_2wiki_base.yaml
+name: qwen3b-2wiki-agent
+method: agent
+retrieval: {type: http, url: http://127.0.0.1:8101, method: bm25, rerank: false}
