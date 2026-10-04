@@ -4,6 +4,38 @@
 
 ## 当前位置
 
+**✅ Day 15 第一项：微调商品重排模型，test 上显著优于所有通用方法（2026-10-05）。** 预先登记 `docs/DAY15_PREREG.md`（`e176445`），4 条预期全部成立。
+
+做什么：用 ESCI 官方 train（剔除 validation / debug 的 425 条，约 2 万查询、40 万对）微调 bge-reranker-base。训练目标是同一查询内的组内排序（ListNet：目标分布 = softmax(增益 E3/S2/C1/I0)），和 nDCG 只看组内顺序一致。2 轮、10232 步、28 分钟，单卡 4090。脚本 `experiments/day15_finetune_reranker.py`；评测 `experiments/day15_eval_reranker.py`。检查点固定用最后一步（`last`），不用按 validation 挑的 `best`。
+
+**Setting A（完整候选池排序，nDCG@10）**：
+
+| | validation 400 | test 400 | 每条查询耗时 |
+|---|---|---|---|
+| Dense（e5） | 0.849 | 0.852 | 45ms |
+| 通用重排（bge-reranker-base） | 0.851 | 0.853 | 20ms |
+| **微调重排** | **0.878** | **0.877** | 19ms |
+| 微调 − Dense | +2.9 [+1.8, +4.1] | **+2.5 [+1.3, +3.7]** | |
+| 微调 − 通用重排 | +2.7 [+1.6, +3.8] | **+2.4 [+1.2, +3.5]** | |
+| 通用重排 − Dense | +0.3 [−0.7, +1.2] | +0.1 [−0.9, +1.1] | |
+
+C=0 口径：test 上微调 0.868 vs Dense 0.841，结论一致。训练曲线：第 0 步 0.852 → 500 步 0.867 → 5500 步 0.876 → 末步 0.878，第二轮还在缓慢涨，没有过拟合迹象。
+
+**收益从哪来（test，按查询类型）**：
+- **含否定词**（without / not / no，39 条）：Dense 0.700 → 微调 **0.807（+10.7，显著；validation 30 条 +10.6）**。例：`necklace without pendant`，Dense 前 5 是 S / E / S / S / I，微调后 E / E / E / E / I。向量检索把"不带吊坠"和"吊坠项链"编码得很近，只看语义相似度分不清否定
+- 含数字 / 型号（82 条）：+4.5 显著；长查询（≥ 6 词、多约束，53 条）：+3.7 显著
+- 短查询（≤ 2 词）+0.2、其余普通查询 +0.9，都不显著 → 收益集中在"需要精细判断"的查询上
+
+**按需升级（Dense → 微调重排）依旧不成立**：4 个门控信号的 AUC 在 0.47～0.53，和随机一样；"每条都重排"就是最优策略。而且重排本身比 Dense 还快（19 vs 45ms，Dense 要现场编码全部候选），**在商品上没有"省成本"的空间可挖**——这和 QA 不同：QA 里升级要多调一次 3B 大模型（约 900ms），所以门控才值钱。
+
+**结论（面试要点）**：
+1. Day 13 的"通用方法全部打平"不是方法不行，是**缺领域数据**：同一个模型结构、同样的耗时，用 2 万条查询的标签微调，test 上显著 +2.5
+2. 收益集中在否定词（+10.7）、型号、多约束查询 → 微调学到的是**细粒度约束**，正是通用模型的盲区
+3. 按需升级的价值取决于"贵的一路"有多贵：QA 上升级一次 ≈ 900ms 的大模型调用，值得门控；商品上重排只要 19ms，直接全做
+
+**下一步**：计划里 Day 15 原定的内容（Setting A test 上的规则 / LLM 路由对比）——Dense 和通用重排、3B 大模型在 Day 13 已测过都不如微调重排，路由没有可以选的更强一路，剩下的主要是写报告。建议 Day 16 做商品部分总结 + 决定 V3（GRPO 训练）是否启动（计划的 Stop Point 3 在 Day 17）。
+
+
 **✅ Day 14 Stop Point 2 通过（2026-10-04），QA V2 冻结，标签 `v2-adaptive-qa`。** 4 项检查全部满足，总表见 `docs/V2_REPORT.md` 第 3b 节，原始数 `docs/day14_cost_breakdown.json`。
 
 - test 上补跑 B0 / B1 / B2（预先登记补充 `81679f8`，补跑在主实验之后，不参与决策），6 个运行全部 `valid=true`：
@@ -427,6 +459,16 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
 
+## Day 15 子步骤
+
+- [x] 15.1 微调脚本 `experiments/day15_finetune_reranker.py`：ListNet 组内排序损失，每组最多 16 个候选、每步 4 个查询，lr 2e-5、warmup 5%、bf16 autocast、max_length 256；断言训练查询和 validation / debug / 官方 test 零重叠
+- [x] 15.2 调试跑（800 个查询、200 步、48 秒）：validation 0.852 → 0.857，流程跑通
+- [x] 15.3 正式训练 2 轮（10232 步，28 分钟），检查点在 `/root/autodl-tmp/checkpoints/esci_reranker_v1/{best,last}`（数据盘，不进 git）
+- [x] 15.4 validation 评测 `20261004-234931`：微调 0.878 vs Dense 0.849（+2.9 显著）
+- [x] 15.5 预先登记 `docs/DAY15_PREREG.md`（`e176445`），固定 `last` 检查点（sha256 `8b7c60ef…`）
+- [x] 15.6 test 评测 `20261004-235145`（只跑一次）：+2.5 [+1.3, +3.7] 显著，4 条预期全部成立；按查询类型分析
+- [ ] 15.7 商品部分写进报告；决定是否启动 V3
+
 ## Day 14 子步骤
 
 - [x] 14.1 冻结审计（git diff）：预先登记 → test 运行之间只新增运行脚本；10 个主实验运行同一个 commit；test 后 QA 代码未改
@@ -694,6 +736,7 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | Qwen2.5-3B-Instruct（6.17GB） | `/root/autodl-tmp/hf_models/Qwen2.5-3B-Instruct/` | `bash /root/Search-R1/download_model_modelscope.sh`（ModelScope + aria2c，约 5 分钟） |
 | ESCI 原始数据（1.1GB） | `data/raw/esci/` | 官方仓库 `amazon-science/esci-data` 的 `shopping_queries_dataset_{examples,products}.parquet`（examples sha256 `4a735b69…`、products `25124442…`）。`sources.parquet` 官方就是 0 字节，跳过；products 有 1.1GB，curl 断了就 `-C -` 续传 |
 | ESCI 商品语料 + 划分（582MB） | `data/esci/v1/` | `python -m data_prep.prepare_esci`（validation 400 / debug 25 来自官方 train，test 400 来自官方 test） |
+| ESCI 微调重排模型（约 1.1GB × 2） | `/root/autodl-tmp/checkpoints/esci_reranker_v1/{best,last}` | `python -m experiments.day15_finetune_reranker --out /root/autodl-tmp/checkpoints/esci_reranker_v1 --epochs 2 --eval-every 500`（停掉 vLLM，约 28 分钟；`last` 的 sha256 前 16 位 `8b7c60efcf20d5e2`） |
 | ESCI BM25 索引（907MB） | `indexes/esci_v1_bm25/` | `python -m retrieval.bm25 build --corpus data/esci/v1/corpus.jsonl --index indexes/esci_v1_bm25`（48 万商品，约 110 秒） |
 
 ## Day 1 子步骤
@@ -826,6 +869,9 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-04 | 重排耗时用回放测：test 里 300 条真实查询，服务端分别计时召回和重排 | 轨迹里每次检索只记了总耗时；回放时没有其他负载，测的是单次成本，按检索次数乘回各组 |
 | 2026-10-04 | Day 15 先做商品重排模型微调，再做计划里的路由实验 | 通用模型在商品上全部打平（Day 13），缺的是领域数据；路由要有一个比 Dense 强的"贵的一路"才有意义 |
 | 2026-10-04 | 商品重排微调时剔除 validation / debug 的 425 条查询 | 这两个划分是从官方 train 抽的，不剔除就是拿考题训练 |
+| 2026-10-05 | 商品重排用 ListNet 组内损失（目标 softmax(E3/S2/C1/I0)），不用逐对分类 | 和 nDCG 一样只看组内相对顺序；直接用评测的增益映射当目标，训练和评测口径一致 |
+| 2026-10-05 | test 固定用最后一步检查点 `last`，不用 validation 上挑的 `best` | `best` 是按 validation 选出来的，`last` 是固定训练预算的结果，没做任何选择；两者在 validation 上只差 0.0006 |
+| 2026-10-05 | 商品不做"按需重排" | 门控 AUC ≈ 0.5，而且重排（19ms）比 Dense 现场编码（45ms）还快，没有可省的成本；全部重排就是最优 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
