@@ -4,10 +4,46 @@
 
 ## 当前位置
 
+**✅ Day 12 主实验完成（2026-10-04）：test 上三条预期全部成立。按需升级在没碰过的 test 上稳定优于强固定基线，成本只多 45～54%；全量多轮 Agent 依旧不显著、贵 4 倍以上。**
+
+预定组、门槛和判定规则见 `docs/DAY12_PREREG.md`（跑 test 前 commit）。test 集：HotpotQA 500 题、2Wiki 800 题（每类 200，从官方 dev 抽，和 train 不重叠）。贪心、seed 0，配置和 validation 一字不改。
+
+**主表（test，逐题配对 bootstrap 95%，和 B3 比）**
+
+| | HotpotQA EM | −B3 | 2Wiki EM | −B3 | 输入 token 倍数 |
+|---|---|---|---|---|---|
+| B3（搜一次 + 重排） | 0.360 | — | 0.299 | — | 1.00 |
+| 全量多轮 Agent（最多 3 搜） | 0.378 | +1.8 [−2.6, +6.0] | 0.312 | +1.4 [−2.4, +5.1] | **4.25 / 4.51** |
+| cascade 每题探测（rewrite） | 0.390 | +3.0 [+0.8, +5.4] * | 0.335 | +3.6 [+1.9, +5.4] * | 2.27 / 2.30 |
+| **cascade 分差门控（rewrite）** | 0.386 | **+2.6 [+1.0, +4.4] \*** | 0.326 | **+2.8 [+1.5, +4.1] \*** | **1.54 / 1.45** |
+| **cascade 每题 agent 探测** | 0.426 | **+6.6 [+3.0, +10.2] \*** | 0.370 | **+7.1 [+4.4, +9.9] \*** | 1.91 / 2.09 |
+| 分差门控 + agent 探测（离线推算） | 0.392 | +3.2 [+1.0, +5.4] * | 0.326 | +2.8 [+1.5, +4.0] * | 1.44 / 1.41 |
+
+- **预先登记的三条预期在 test 上全部成立**：H1 分差门控显著优于 B3（HotpotQA 上超出了 validation 多 seed 的预期——那里 0/3 显著，test 上显著）；H2 agent 探测两个数据集都显著，且幅度比 validation 更大；H3 全量 Agent 不显著、贵 4 倍以上
+- **质量–成本前沿**：省成本（1.45～1.54 倍 token，p50 几乎不变）用分差门控，拿 2.6～2.8 个点；要质量（约 2 倍 token）用 agent 探测，拿 6.6～7.1 个点。全量 Agent（4.25～4.51 倍）被两者完全支配
+- **test 比 validation 难**：2Wiki 的 B3 从 0.346 掉到 0.299，多轮 Agent 在 validation 上的 +2.0 到 test 上只剩 +1.4 → 只看 validation 会高估绝对水平，但方法之间的相对结论没变
+
+**2Wiki test 按题型（每类 200）**：B3 的短板在组合题和推理题，两种升级补的位置不同
+
+| EM | 桥接比较 | 比较 | 组合 | 推理 |
+|---|---|---|---|---|
+| B3 | 0.495 | 0.515 | 0.120 | 0.065 |
+| 全量多轮 Agent | 0.345（**变差**） | 0.505 | 0.280 | 0.120 |
+| cascade 分差门控 | 0.495 | 0.515 | **0.195** | 0.100 |
+| cascade 每题 agent 探测 | 0.515 | **0.635** | **0.220** | 0.110 |
+
+- 分差门控的收益全在**组合题**（0.120 → 0.195）：分差大 = 桥接实体没搜到，正好是它挑出来的题
+- agent 探测额外修好了**比较题**（0.515 → 0.635）：这类题证据本来就够，是模型读错（yes/no 答反、答成 false），只能靠"模型自己决定要不要答"来救
+- **全量 Agent 在桥接比较题上明显变差**（0.495 → 0.345）：多搜几轮反而把答案带偏，这是它整体收益接近 0 的原因
+- 回到 Day 11 的结论：一个门控信号只覆盖一种错误。要覆盖两种，就得让模型自己看一眼（agent 探测），代价是每题多一次调用
+
+脚本：`experiments/run_day12_test.sh`（跑）、`experiments/day12_test_summary.py`（汇总，输出 `outputs/day12_test_summary.json`）。
+
+
+
 **V1 完成（Day 1～7，2026-09-29），标签 `v1-baseline`。总结见 `docs/V1_REPORT.md`（结论、框架图、主表、稳健性、3 成功 + 3 失败案例、30 秒介绍、Stop Point 1 检查）。**
 结论：多轮搜索稳定地提高证据召回（+8.5～+12.5，4 种解码设定都显著），准确率没有稳定优势（EM 差距 −2.0～+4.5）；错误从"搜不到"转移成"读不对"和"停不准"。复现性：四种方法重跑 800/800 逐字一致。
 
-**Day 11 进行中：cascade 代码、离线推算、HotpotQA 在线、agent 探测拆解（11.4）、2Wiki 在线收尾（11.5）、多 seed（11.6）、文档（11.7）已完成；下一步决定 Policy 接口 / BudgetManager 要不要单独抽象，然后进 Day 12 主实验。cascade 代码在 `ccc54ad`。**
 
 **11.6 结论（2026-10-03，多 seed，temperature 0.7，和同 seed 的 B3 配对，`python -m experiments.day11_seed_summary`）：两种升级都多数 seed 显著，只有"分差门控 @ HotpotQA"一格不稳（3 个 seed 都为正，但都不显著）。**
 
@@ -299,6 +335,14 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 若资产丢失（例如释放了实例），按本文件「数据与索引位置」一节的命令重建；模型用 `/root/Search-R1/download_model_modelscope.sh` 重新下载。
 
 > 2026-09-27 用户反馈：讲解和提问要宏观优先（每步做什么 / 为什么 / 结论 / 全局位置），实现细节由 Claude 决定并记在决策表，不逐条提问。已写入 `CLAUDE.md` 和记忆；宏观全景见 `docs/PROJECT_OVERVIEW.md`。
+
+## Day 12 子步骤
+
+- [x] 12.1 2Wiki test 集：`data_prep/prepare_2wiki.py` 加 `test` 划分（从官方 dev 按题型分层抽，每类 200，独立随机数生成器）→ 已有 analysis / validation / debug 和语料逐字节不变（sha256 复核）
+- [x] 12.2 补齐缺的配置：`qwen3b_2wiki_agent_dense_rerank.yaml`（2Wiki 全量多轮 Agent）、`qwen3b_2wiki_cascade_always.yaml`（每题探测，用于离线推算）
+- [x] 12.3 上 test 前检查（validation）：① cascade 每题探测和 Day 10 两跳运行答案 799/800 一致（唯一不同的那题是探测时原样重搜原问题 → 按设计不再搜第二次，两边都答错）；② 2Wiki 全量 Agent EM +2.0 不显著、token 4.2 倍，和 HotpotQA 一致
+- [x] 12.4 预先登记 `docs/DAY12_PREREG.md`（组、门槛、判定、规则），commit `8e23cde` 之后才跑 test
+- [x] 12.5 test 主实验：`experiments/run_day12_test.sh`，两个数据集各 5 组、每组只跑一次（贪心 seed 0），10 个运行全部 `valid=true`；汇总 `experiments/day12_test_summary.py` → `outputs/day12_test_summary.json`（结果见"当前位置"）
 
 ## Day 11 子步骤
 

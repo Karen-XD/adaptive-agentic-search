@@ -426,6 +426,12 @@ B4 的初始启发式可以是短实体/型号词 → BM25、较长语义表达 
 
 **验收**：可以实证回答“为什么不对所有 Query 都执行 Hybrid + Rerank？”若回答是“在这批样本里强固定策略更好”，也应保存结论并做错误归因，不能编造优势。
 
+> **实际进展（2026-10-04，已完成）**：把上面 4 条消融在 Day 8～11 的 validation 阶段分别做掉了（Always/Never Rerank 见 Day 9；固定检索器 vs 动态见 Day 8 与 Day 8.7 路由上限；No Evidence-conditioned Rewrite 见 Day 10；Fixed Turns vs 自由 stop 见 V1）。Day 9～11 的结论把主线收敛成"按需升级"，所以 test 主实验跑的是收敛后的 5 组：B3、全量多轮 Agent、每题探测（rewrite）、分差门控、每题 agent 探测；组、门槛、判定规则在跑 test 前预先登记（`docs/DAY12_PREREG.md`，commit `8e23cde`），test 每个数据集各跑一次。
+>
+> 结果（HotpotQA test 500 题 / 2Wiki test 800 题，−B3 EM，逐题配对 95% 区间）：分差门控 +2.6 [+1.0,+4.4] / +2.8 [+1.5,+4.1] 均显著，输入 token 1.54 / 1.45 倍；每题 agent 探测 +6.6 [+3.0,+10.2] / +7.1 [+4.4,+9.9] 均显著，约 2 倍；全量多轮 Agent +1.8 / +1.4 不显著、4.25 / 4.51 倍。三条预期全部成立。
+>
+> **"为什么不对所有 Query 都执行 Hybrid + Rerank？"** 的实证回答：在 2Wiki 上 Hybrid + 重排比 Dense + 重排只高 0.2 个点（[−1.1,+1.6] 打平），而且加重排这一步在 Day 9 已经把检索器之间的差距抹平（Dense 0.300 → 0.405，与 Hybrid 持平）→ 检索器选哪路不重要，**重排要做**（4 个解码设定都显著），但"给每道题都多花一次生成调用"不划算：分差门控只探测三成的题就拿到全部升级收益的绝大部分。详细成本表见 `docs/PROGRESS.md`。
+
 ## Day 13｜新增商品搜索后端
 
 1. 下载官方 Amazon Shopping Queries / ESCI 字段表，选择 US/small_version 子集，保留官方 split，从 train 划出 validation。
