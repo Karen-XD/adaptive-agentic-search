@@ -4,6 +4,12 @@
 
 ## 当前位置
 
+> **⏸ 2026-10-05 关机前状态**：QA V2 已冻结（标签 `v2-adaptive-qa`，报告 `docs/V2_REPORT.md`）；商品搜索 Day 13～15 全部完成，报告 `docs/COMMERCE_REPORT.md`。代码、文档全部 commit + push，工作区干净。tmux 和所有服务都已停（vLLM、检索服务都没在跑）。
+>
+> **下次接着做**：先决定 **V3（GRPO 训练，让模型自己学会什么时候搜）要不要启动**——计划里的 Stop Point 3 在 Day 17。要启动的话，先读计划第三周部分和 `third_party/Search-R1` 的 `train_grpo.sh`，评估单卡 4090 能跑多大规模；不启动的话，把时间用在补实验（Setting B 全库检索、2Wiki 是非题答案偏向、微调重排换 seed 复现）和面试材料上。
+> 重跑任何 QA 实验前按"服务器重启后的恢复清单"起 vLLM（8000）和检索服务；商品实验只需要 GPU（微调重排检查点在 `/root/autodl-tmp/checkpoints/esci_reranker_v1/`）。
+
+
 **✅ Day 15 第一项：微调商品重排模型，test 上显著优于所有通用方法（2026-10-05）。** 预先登记 `docs/DAY15_PREREG.md`（`e176445`），4 条预期全部成立。
 
 做什么：用 ESCI 官方 train（剔除 validation / debug 的 425 条，约 2 万查询、40 万对）微调 bge-reranker-base。训练目标是同一查询内的组内排序（ListNet：目标分布 = softmax(增益 E3/S2/C1/I0)），和 nDCG 只看组内顺序一致。2 轮、10232 步、28 分钟，单卡 4090。脚本 `experiments/day15_finetune_reranker.py`；评测 `experiments/day15_eval_reranker.py`。检查点固定用最后一步（`last`），不用按 validation 挑的 `best`。
@@ -467,7 +473,8 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - [x] 15.4 validation 评测 `20261004-234931`：微调 0.878 vs Dense 0.849（+2.9 显著）
 - [x] 15.5 预先登记 `docs/DAY15_PREREG.md`（`e176445`），固定 `last` 检查点（sha256 `8b7c60ef…`）
 - [x] 15.6 test 评测 `20261004-235145`（只跑一次）：+2.5 [+1.3, +3.7] 显著，4 条预期全部成立；按查询类型分析
-- [ ] 15.7 商品部分写进报告；决定是否启动 V3
+- [x] 15.7 商品部分写成 `docs/COMMERCE_REPORT.md`（结论、管线、主表、微调细节、按查询类型归因、QA vs 商品的级联对比、能说 / 不能说、复现、一分钟版）；V2 报告加链接
+- [ ] 15.8 决定是否启动 V3（下次开始时）
 
 ## Day 14 子步骤
 
