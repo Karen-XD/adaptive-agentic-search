@@ -18,11 +18,12 @@
 - 多用搜广推的类比（多路召回、融合、精排、算力分配）解释 Agent 概念。
 - 不一次性堆大量代码；每段代码都要说明为什么这样设计。
 
-## 环境事实（AutoDL，1× RTX 4090 24GB，16 vCPU）
+## 环境事实（AutoDL，1× A800 80GB PCIe，14 vCPU，内存 120GB）
 
-> **2026-10-05 迁移到 A800 80GB**（为 V3 的 GRPO 全参训练）。新机器上先按 `docs/MIGRATION.md` 恢复数据盘并验收，之后把本节的 GPU / vCPU / 磁盘数字改成新机器的实际值。
+> 2026-10-06 从 RTX 4090 24GB 迁移到 A800 80GB 完成（为 V3 的 GRPO 全参训练），验收记录见 `docs/PROGRESS.md`。Day 1～15 的结果都是在 4090 上跑的；换卡后贪心解码不逐字一致（200 题里 9 题答案不同），**V3 的对照组一律在 A800 上重跑**，不拿 4090 的运行直接比。
 
-- 系统盘 `/` 30G（剩余约 9G），**会**进镜像；数据盘 `/root/autodl-tmp` 50G，**不**进镜像；**可按需扩容**（磁盘不再是硬约束，但扩容有成本，大语料实验前先和用户确认）。
+- 系统盘 `/` 30G（剩余约 6G），**会**进镜像；数据盘 `/root/autodl-tmp` 50G（恢复后已用 16G），**不**进镜像；**可按需扩容**（磁盘不再是硬约束，但扩容有成本，大语料实验前先和用户确认；V3 每个全参检查点约 12GB）。
+- 这台机器下载慢：hf-mirror 约 0.5MB/s，GitHub 单连接约 30KB/s（学术加速不支持本地区），大文件用 aria2c 多连接并行下。
 - 项目本身放在数据盘（`/root/autodl-tmp` 下），`/root/adaptive-agentic-search` 是指向它的软链接；Claude 工具里显示的路径可能被映射成别的样子，以 `df` 结果为准。
 - 缓存都指向数据盘：`HF_HOME=/root/autodl-tmp/cache/huggingface`、`PIP_CACHE_DIR=/root/autodl-tmp/cache/pip`、`HF_ENDPOINT=https://hf-mirror.com`（写在 `~/.bashrc`，非交互 shell 不会自动加载，需显式 export）。`/root/.cache` 是指向 `/root/autodl-tmp/.cache_root` 的软链接，新数据盘上要先 `mkdir -p` 目标目录。
 - 模型下载：ModelScope + aria2c 多线程（参考 `/root/Search-R1/download_model_modelscope.sh`），放 `/root/autodl-tmp/hf_models/`。
