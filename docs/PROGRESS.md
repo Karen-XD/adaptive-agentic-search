@@ -6,7 +6,7 @@
 
 > **⏸ 2026-10-05 关机前状态**：QA V2 已冻结（标签 `v2-adaptive-qa`，报告 `docs/V2_REPORT.md`）；商品搜索 Day 13～15 全部完成，报告 `docs/COMMERCE_REPORT.md`。代码、文档全部 commit + push，工作区干净。tmux 和所有服务都已停（vLLM、检索服务都没在跑）。
 >
-> **下次接着做**：先决定 **V3（GRPO 训练，让模型自己学会什么时候搜）要不要启动**——计划里的 Stop Point 3 在 Day 17。要启动的话，先读计划第三周部分和 `third_party/Search-R1` 的 `train_grpo.sh`，评估单卡 4090 能跑多大规模；不启动的话，把时间用在补实验（Setting B 全库检索、2Wiki 是非题答案偏向、微调重排换 seed 复现）和面试材料上。
+> **下次接着做**：先决定 **V3（GRPO 训练，让模型自己学会什么时候搜）要不要启动**（资源估算见下方"V3（GRPO）资源评估"：3B 全参至少 1 × 80GB；4090 只能做 LoRA）——计划里的 Stop Point 3 在 Day 17。要启动的话，先读计划第三周部分和 `third_party/Search-R1` 的 `train_grpo.sh`，评估单卡 4090 能跑多大规模；不启动的话，把时间用在补实验（Setting B 全库检索、2Wiki 是非题答案偏向、微调重排换 seed 复现）和面试材料上。
 > 重跑任何 QA 实验前按"服务器重启后的恢复清单"起 vLLM（8000）和检索服务；商品实验只需要 GPU（微调重排检查点在 `/root/autodl-tmp/checkpoints/esci_reranker_v1/`）。
 
 
@@ -887,6 +887,30 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 - `data/bm25_index/`（2.2G）：wiki-18 的 BM25（Lucene）索引；对应语料 `wiki-18.jsonl` 原先放在数据盘，已丢失。
 - `eval/data/corpus/hotpotqa_corpus.jsonl`：41,897 个段落；`eval/data/eval/hotpotqa_dev.jsonl`：500 道题。
 - `eval/src/`：上次写的 base / rag / agent 评测和 GRPO 代码。
+
+## V3（GRPO）资源评估（2026-10-05，估算，未实测）
+
+模型 Qwen2.5-3B（30.9 亿参数，36 层，KV 头 2 个，词表 15.2 万）。轨迹长度用本项目 test 实测：全量多轮 Agent 最终序列均值 1216 / p95 2010 token，模型生成 178 token / 条。
+
+**代码事实（`/root/Search-R1` 的 veRL，已读源码确认）**：
+- 策略模型训练时用 **fp32** 存权重（`fsdp_workers.py`：actor 默认 `torch.float32`，参考模型 bf16）
+- offload 只在阶段之间做：`update_actor` 开始时把参数、梯度、优化器状态**全部搬回显卡**，更新完再搬走 → 单卡时更新阶段必须一次装下全部训练状态，开不开 offload 都一样
+- 训练部分**不支持 LoRA**（lora 只出现在 vendored 的 vLLM 代码里）
+- 上次单卡冒烟（2026-07-22，batch 16 × 5，3 步）的配置没开 offload；日志写在 `/tmp`，重启后已丢失，无法确认结果。按下面的账，它在更新阶段放不下
+
+**显存账（单卡，更新阶段的峰值）**：fp32 权重 12.3GB + fp32 梯度 12.3GB + Adam 两个状态 24.7GB = **49.4GB**；再加激活（开梯度检查点，micro batch 2 条 × 约 1200 token，其中输出层 logits 约 1.5GB × 2～3 份）3～5GB、CUDA 上下文 1～2GB → **约 55GB**。生成阶段 vLLM 占 bf16 权重 6.2GB + KV cache（每 token 36KB，80 条 × 1200 token ≈ 3.5GB），生成完释放
+
+| 方案 | 最低配置 | 说明 |
+|---|---|---|
+| 3B 全参（Search-R1 原样） | **1 × 80GB**（A100 / H100） | 55GB < 80GB；4090 要 ≥ 4 张（49.4 / 4 + 约 6.5 ≈ 19GB / 张），但 4090 之间没有 NVLink，通信慢 |
+| 7B 全参 | 2 × 80GB | 7.6B × 16 字节 = 122GB，分两张各约 61GB + 激活 |
+| **3B LoRA** | **1 × 4090（现在这台）** | bf16 冻结权重 6.2GB + LoRA 状态约 0.5GB + 激活 3～5GB + 生成时 KV 约 6～8GB → 峰值约 14～16GB。参考模型 = 关掉 LoRA 的同一个模型，不占额外显存。要换训练代码（上次的自写脚本 `/root/Search-R1/eval/src/train_grpo_agent.py`，HF 生成，未验证；或新建 conda 环境装新版 veRL / TRL，不能装进 verl_env） |
+| 0.5B 全参 | 1 × 4090 | 约 11GB，但模型太弱，结论很难外推 |
+
+**时间账（每步 16 个问题 × 5 条轨迹 = 80 条，按 4090 算力；A100 约快 2 倍）**：生成（多轮每轮重新 prefill，约 20 万 token + 解码）20～40s；旧策略和参考模型各算一次 log prob 15～20s；策略更新（前向 + 反向 + 重算）约 35s；offload 搬运和权重同步约 10s → **约 1.5 分钟 / 步**
+- Search-R1 原规模（1005 步 × 每步 512 × 5 = 32 倍于上面的 batch）：单张 4090 的算力约 30 天，**不可行**；8 × H100 估计半天到一天
+- 计划里 V3 的规模（冒烟 20～50 步 + 两组可比训练各约 200 步）：1 × A100 80GB 全参约 3 小时 / 组，总共约 8～10 小时租卡；4090 + LoRA 约 5～7 小时 / 组（HF 生成比 vLLM 慢），总共约 12～16 小时
+- 以上都是 ±2 倍的估算，以冒烟测试实测为准
 
 ## 待办 / 开放问题
 
