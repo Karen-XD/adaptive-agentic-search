@@ -20,6 +20,8 @@
 
 ## 环境事实（AutoDL，1× RTX 4090 24GB，16 vCPU）
 
+> **2026-10-05 迁移到 A800 80GB**（为 V3 的 GRPO 全参训练）。新机器上先按 `docs/MIGRATION.md` 恢复数据盘并验收，之后把本节的 GPU / vCPU / 磁盘数字改成新机器的实际值。
+
 - 系统盘 `/` 30G（剩余约 9G），**会**进镜像；数据盘 `/root/autodl-tmp` 50G，**不**进镜像；**可按需扩容**（磁盘不再是硬约束，但扩容有成本，大语料实验前先和用户确认）。
 - 项目本身放在数据盘（`/root/autodl-tmp` 下），`/root/adaptive-agentic-search` 是指向它的软链接；Claude 工具里显示的路径可能被映射成别的样子，以 `df` 结果为准。
 - 缓存都指向数据盘：`HF_HOME=/root/autodl-tmp/cache/huggingface`、`PIP_CACHE_DIR=/root/autodl-tmp/cache/pip`、`HF_ENDPOINT=https://hf-mirror.com`（写在 `~/.bashrc`，非交互 shell 不会自动加载，需显式 export）。`/root/.cache` 是指向 `/root/autodl-tmp/.cache_root` 的软链接，新数据盘上要先 `mkdir -p` 目标目录。

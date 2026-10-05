@@ -4,6 +4,8 @@
 
 ## 当前位置
 
+> **🚚 2026-10-05 迁移到 A800 80GB**：系统盘用镜像带走，数据盘重建。**新机器上先按 `docs/MIGRATION.md` 做**（clone → `scripts/migration/restore_data_disk.sh` → 验收 → 换卡复现性检查 → 更新文档），全部通过后再接着做下面的 V3。迁移前已在旧机器上演练通过（8 步全过，数据准备逐字节一致，检索指纹 100%，171 个测试通过）。
+
 > **⏸ 2026-10-05 关机前状态**：QA V2 已冻结（标签 `v2-adaptive-qa`，报告 `docs/V2_REPORT.md`）；商品搜索 Day 13～15 全部完成，报告 `docs/COMMERCE_REPORT.md`。代码、文档全部 commit + push，工作区干净。tmux 和所有服务都已停（vLLM、检索服务都没在跑）。
 >
 > **下次接着做**：先决定 **V3（GRPO 训练，让模型自己学会什么时候搜）要不要启动**（资源估算见下方"V3（GRPO）资源评估"：3B 全参至少 1 × 80GB；4090 只能做 LoRA）——计划里的 Stop Point 3 在 Day 17。要启动的话，先读计划第三周部分和 `third_party/Search-R1` 的 `train_grpo.sh`，评估单卡 4090 能跑多大规模；不启动的话，把时间用在补实验（Setting B 全库检索、2Wiki 是非题答案偏向、微调重排换 seed 复现）和面试材料上。
