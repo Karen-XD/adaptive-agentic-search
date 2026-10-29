@@ -1,0 +1,126 @@
+"""模型尺寸对照（3B vs 7B，validation）：同一台机器、同一份代码，V2 的 5 组只换模型。
+
+用法：python -m experiments.model_size_summary --since 20261029-000000 [--out outputs/model_size_summary.json]
+按运行名找 outputs/runs 下 --since 之后的 validation 运行（每组正好一个带 metrics.json 的；多了少了都报错），
+并核对服务端实际加载的模型目录，防止"配置写的 7B、服务端其实是 3B"。
+
+回答三个问题：
+1. 同一组换成 7B 涨多少（7B − 3B，同一批题逐题配对）
+2. 7B 上级联还比 B3 好吗（−B3，和 V2 主表同一口径）
+3. 损失拆解：B0 →（检索）B3 →（按需升级）级联 → Oracle →（阅读和标签噪声）100%。
+   Oracle 是读了金标的诊断上限，不是方法，不参与方法比较。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections import defaultdict
+from pathlib import Path
+
+import yaml
+
+from experiments.compare_runs import load, paired_bootstrap
+
+RUNS = Path("outputs/runs")
+ARMS = [("B0 Direct", "direct"), ("B3 搜一次 + 重排", "static-rag-dense-rerank"),
+        ("cascade 分差门控", "cascade-gap"), ("cascade 每题 agent 探测", "cascade-always-agent"),
+        ("Oracle（诊断上限）", "oracle")]
+SIZES = {"3b": "Qwen2.5-3B-Instruct", "7b": "Qwen2.5-7B-Instruct"}
+DATASETS = {"hotpotqa": ("", "data/hotpotqa/v1/labels/validation.jsonl"),
+            "2wiki": ("2wiki-", "data/2wiki/v1/labels/validation.jsonl")}
+
+
+def find_run(name: str, since: str) -> Path:
+    pat = re.compile(rf"^(\d{{8}}-\d{{6}})-{re.escape(name)}-validation$")
+    runs = [p for p in RUNS.iterdir() if (m := pat.match(p.name)) and m.group(1) >= since
+            and (p / "metrics.json").exists()]
+    if len(runs) != 1:
+        raise SystemExit(f"{name}: {since} 之后找到 {len(runs)} 个完整的 validation 运行，应该正好 1 个：{sorted(runs)}")
+    return runs[0]
+
+
+def check_model(run: Path, size: str) -> None:
+    root = yaml.safe_load(open(run / "config.yaml", encoding="utf-8"))["run"]["llm_server"]["root"]
+    if Path(root).name != SIZES[size]:
+        raise SystemExit(f"{run.name}: 服务端模型是 {root}，应该是 {SIZES[size]}")
+
+
+def ci(d: tuple[float, float, float]) -> str:
+    return f"{d[0] * 100:+5.1f} [{d[1] * 100:+5.1f},{d[2] * 100:+5.1f}]{'*' if d[1] > 0 or d[2] < 0 else ' '}"
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--since", required=True, help="只认这个时间之后的运行（运行名前缀 YYYYMMDD-HHMMSS），排除 4090 上的旧运行")
+    ap.add_argument("--out")
+    args = ap.parse_args()
+    result = {}
+    for ds, (infix, labels_path) in DATASETS.items():
+        labels = {r["qid"]: r for r in map(json.loads, open(labels_path, encoding="utf-8"))}
+        runs, trajs, metrics = {}, {}, {}
+        for size in SIZES:
+            for label, key in ARMS:
+                p = find_run(f"qwen{size}-{infix}{key}", args.since)
+                check_model(p, size)
+                t = load(p)
+                if set(t) != set(labels):
+                    raise SystemExit(f"{p.name}: 题目集合和标签文件不一致")
+                m = json.load(open(p / "metrics.json", encoding="utf-8"))
+                if not m["valid"]:
+                    raise SystemExit(f"{p.name}: metrics.valid = false")
+                runs[size, label], trajs[size, label], metrics[size, label] = p.name, t, m
+        commits = sorted({(RUNS / r / "git_commit.txt").read_text().strip()[:7] for r in runs.values()})
+
+        print(f"\n== {ds} validation（{len(labels)} 题；commit {', '.join(commits)}）==")
+        print("−B3 / 7B−3B 是逐题配对 bootstrap 的 EM 差（百分点）和 95% 区间，* = 区间不含 0；token 是平均输入 token")
+        print(f"{'组':24s} {'3B EM':>6s} {'7B EM':>6s} {'7B−3B':>21s} {'3B −B3':>21s} {'7B −B3':>21s}"
+              f" {'3B F1':>6s} {'7B F1':>6s} {'3B tok':>7s} {'7B tok':>7s}")
+        rows = {}
+        b3 = "B3 搜一次 + 重排"
+        for label, _ in ARMS:
+            em = {s: [trajs[s, label][q]["eval"]["em"] for q in labels] for s in SIZES}
+            gain = paired_bootstrap([b - a for a, b in zip(em["3b"], em["7b"])])
+            vs_b3 = {s: paired_bootstrap([trajs[s, label][q]["eval"]["em"] - trajs[s, b3][q]["eval"]["em"] for q in labels])
+                     for s in SIZES}
+            m3, m7 = metrics["3b", label], metrics["7b", label]
+            rows[label] = {"runs": {s: runs[s, label] for s in SIZES},
+                           **{f"{k}_{s}": metrics[s, label][k] for s in SIZES
+                              for k in ("accuracy", "f1", "evidence_recall", "mean_prompt_tokens", "mean_search_calls",
+                                        "format_error_rate", "probe_rate", "escalation_rate") if k in metrics[s, label]},
+                           "em_7b_minus_3b": gain, **{f"em_minus_b3_{s}": vs_b3[s] for s in SIZES}}
+            dash = f"{'—':>21s}"
+            print(f"{label:24s} {m3['accuracy']:6.3f} {m7['accuracy']:6.3f} {ci(gain):>21s}"
+                  f" {dash if label == b3 else ci(vs_b3['3b']):>21s} {dash if label == b3 else ci(vs_b3['7b']):>21s}"
+                  f" {m3['f1']:6.3f} {m7['f1']:6.3f} {m3['mean_prompt_tokens']:7.0f} {m7['mean_prompt_tokens']:7.0f}")
+
+        # 损失拆解：每一段是相邻两级的 EM 差；最后一段是 Oracle 到满分的距离（阅读错误 + EM 口径 / 标签噪声）
+        print("  损失拆解（EM 点）：检索收益 B3−B0 | 升级收益 级联(agent 探测)−B3 | 检索还差 Oracle−级联 | 阅读+噪声 1−Oracle")
+        decomp = {}
+        for s in SIZES:
+            acc = {label: metrics[s, label]["accuracy"] for label, _ in ARMS}
+            d = {"retrieval_gain": acc[b3] - acc["B0 Direct"],
+                 "escalation_gain": acc["cascade 每题 agent 探测"] - acc[b3],
+                 "retrieval_gap_to_oracle": acc["Oracle（诊断上限）"] - acc["cascade 每题 agent 探测"],
+                 "reading_and_noise": 1 - acc["Oracle（诊断上限）"]}
+            decomp[s] = d
+            print(f"  {s}: " + " | ".join(f"{v * 100:+5.1f}" for v in d.values()))
+
+        types = sorted({l["type"] for l in labels.values()})
+        by_type = {}
+        print("  按题型 EM（3B → 7B）：" + "  ".join(f"{t}({sum(l['type'] == t for l in labels.values())})" for t in types))
+        for label, _ in ARMS:
+            by_type[label] = {}
+            for s in SIZES:
+                acc = defaultdict(list)
+                for q, t in trajs[s, label].items():
+                    acc[labels[q]["type"]].append(t["eval"]["em"])
+                by_type[label][s] = {k: sum(v) / len(v) for k, v in acc.items()}
+            print(f"  {label:24s} " + "  ".join(f"{by_type[label]['3b'][t]:.3f}→{by_type[label]['7b'][t]:.3f}" for t in types))
+        result[ds] = {"rows": rows, "decomposition": decomp, "by_type": by_type, "commits": commits}
+    if args.out:
+        Path(args.out).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

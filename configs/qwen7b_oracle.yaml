@@ -1,0 +1,5 @@
+# 模型尺寸对照：除模型换成 Qwen2.5-7B-Instruct 外，和 qwen3b_oracle.yaml 完全相同（检索栈、门槛、提示词、解码、预算都不改）。
+# vLLM 要用 --served-model-name qwen2.5-7b-instruct 起；连到 3B 服务会直接报模型不存在，不会悄悄跑错模型。
+extends: qwen3b_oracle.yaml
+name: qwen7b-oracle
+llm: {model: qwen2.5-7b-instruct}
