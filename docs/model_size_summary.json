@@ -18,6 +18,10 @@
         "mean_prompt_tokens_7b": 258.625,
         "mean_search_calls_7b": 0.0,
         "format_error_rate_7b": 0.0990990990990991,
+        "latency_p50_3b": 289.6067500114441,
+        "latency_p50_7b": 427.21935361623764,
+        "latency_p95_3b": 339.08469174057234,
+        "latency_p95_7b": 2184.7072687000036,
         "em_7b_minus_3b": [
           0.075,
           0.015,
@@ -51,6 +55,10 @@
         "mean_prompt_tokens_7b": 599.98,
         "mean_search_calls_7b": 1.0,
         "format_error_rate_7b": 0.024390243902439025,
+        "latency_p50_3b": 365.12535251677036,
+        "latency_p50_7b": 562.6738294959068,
+        "latency_p95_3b": 477.84906625747675,
+        "latency_p95_7b": 776.7793361097566,
         "em_7b_minus_3b": [
           0.06,
           0.0,
@@ -88,6 +96,10 @@
         "format_error_rate_7b": 0.018315018315018316,
         "probe_rate_7b": 0.34,
         "escalation_rate_7b": 0.245,
+        "latency_p50_3b": 381.72121345996857,
+        "latency_p50_7b": 601.3312861323357,
+        "latency_p95_3b": 1544.8669042438262,
+        "latency_p95_7b": 2111.039015091955,
         "em_7b_minus_3b": [
           0.06,
           -0.005,
@@ -125,6 +137,10 @@
         "format_error_rate_7b": 0.018575851393188854,
         "probe_rate_7b": 1.0,
         "escalation_rate_7b": 0.585,
+        "latency_p50_3b": 960.3135157376528,
+        "latency_p50_7b": 1127.9795709997416,
+        "latency_p95_3b": 1567.7705375477667,
+        "latency_p95_7b": 1985.7609745115035,
         "em_7b_minus_3b": [
           0.025,
           -0.035,
@@ -158,6 +174,10 @@
         "mean_prompt_tokens_7b": 457.115,
         "mean_search_calls_7b": 0.0,
         "format_error_rate_7b": 0.004975124378109453,
+        "latency_p50_3b": 238.86019550263882,
+        "latency_p50_7b": 432.6096326112747,
+        "latency_p95_3b": 332.4742063879966,
+        "latency_p95_7b": 664.449986256659,
         "em_7b_minus_3b": [
           0.115,
           0.055,
@@ -244,7 +264,57 @@
     "commits": [
       "7ba7db9",
       "f85aa50"
-    ]
+    ],
+    "gap_probed_overlap": [
+      68,
+      68
+    ],
+    "agent_probe": {
+      "3b": {
+        "counts": {
+          "escalated": 91,
+          "answered": 92,
+          "format_error": 14,
+          "duplicate": 3
+        },
+        "net_fixed": {
+          "escalated": 5,
+          "answered": 11,
+          "format_error": 0,
+          "duplicate": 0
+        },
+        "escalated_recall_b3": 0.7417582417582418,
+        "escalated_recall_after": 0.8296703296703297,
+        "net_fixed_per_escalation": 0.054945054945054944
+      },
+      "7b": {
+        "counts": {
+          "escalated": 117,
+          "answered": 81,
+          "format_error": 2
+        },
+        "net_fixed": {
+          "escalated": 9,
+          "answered": 0,
+          "format_error": 0
+        },
+        "escalated_recall_b3": 0.7735042735042735,
+        "escalated_recall_after": 0.8846153846153846,
+        "net_fixed_per_escalation": 0.07692307692307693
+      }
+    },
+    "cross": {
+      "7b B3 搜一次 + 重排 − 3b cascade 每题 agent 探测": [
+        -0.02,
+        -0.08,
+        0.04
+      ],
+      "7b cascade 分差门控 − 3b cascade 每题 agent 探测": [
+        0.005,
+        -0.06,
+        0.07
+      ]
+    }
   },
   "2wiki": {
     "rows": {
@@ -265,6 +335,10 @@
         "mean_prompt_tokens_7b": 270.54375,
         "mean_search_calls_7b": 0.0,
         "format_error_rate_7b": 0.12171052631578948,
+        "latency_p50_3b": 229.84282113611698,
+        "latency_p50_7b": 436.9563143700361,
+        "latency_p95_3b": 324.37970694154495,
+        "latency_p95_7b": 2803.6094354465595,
         "em_7b_minus_3b": [
           0.02375,
           -0.005,
@@ -298,6 +372,10 @@
         "mean_prompt_tokens_7b": 677.49375,
         "mean_search_calls_7b": 1.0,
         "format_error_rate_7b": 0.0024937655860349127,
+        "latency_p50_3b": 310.17759069800377,
+        "latency_p50_7b": 569.1793411970139,
+        "latency_p95_3b": 376.1737059801817,
+        "latency_p95_7b": 749.0676615387201,
         "em_7b_minus_3b": [
           0.09,
           0.06,
@@ -335,6 +413,10 @@
         "format_error_rate_7b": 0.0019175455417066154,
         "probe_rate_7b": 0.30125,
         "escalation_rate_7b": 0.26875,
+        "latency_p50_3b": 325.99346712231636,
+        "latency_p50_7b": 604.3017357587814,
+        "latency_p95_3b": 1490.4522426426408,
+        "latency_p95_7b": 2320.6229787319894,
         "em_7b_minus_3b": [
           0.11,
           0.07625,
@@ -372,6 +454,10 @@
         "format_error_rate_7b": 0.008524590163934427,
         "probe_rate_7b": 1.0,
         "escalation_rate_7b": 0.89,
+        "latency_p50_3b": 985.2478057146072,
+        "latency_p50_7b": 1233.767706900835,
+        "latency_p95_3b": 1603.9455592632291,
+        "latency_p95_7b": 2427.53308266401,
         "em_7b_minus_3b": [
           0.1425,
           0.1075,
@@ -405,6 +491,10 @@
         "mean_prompt_tokens_7b": 618.375,
         "mean_search_calls_7b": 0.0,
         "format_error_rate_7b": 0.0024937655860349127,
+        "latency_p50_3b": 250.52538514137268,
+        "latency_p50_7b": 448.2770562171936,
+        "latency_p95_3b": 352.17814706265915,
+        "latency_p95_7b": 608.6930697783828,
         "em_7b_minus_3b": [
           0.1625,
           0.12625,
@@ -513,6 +603,56 @@
       "c2ae5ef",
       "c4f50e2",
       "f85aa50"
-    ]
+    ],
+    "gap_probed_overlap": [
+      241,
+      241
+    ],
+    "agent_probe": {
+      "3b": {
+        "counts": {
+          "answered": 281,
+          "escalated": 468,
+          "duplicate": 18,
+          "format_error": 33
+        },
+        "net_fixed": {
+          "answered": 17,
+          "escalated": 18,
+          "duplicate": 0,
+          "format_error": 0
+        },
+        "escalated_recall_b3": 0.5657051282051282,
+        "escalated_recall_after": 0.7318376068376068,
+        "net_fixed_per_escalation": 0.038461538461538464
+      },
+      "7b": {
+        "counts": {
+          "escalated": 712,
+          "answered": 77,
+          "format_error": 11
+        },
+        "net_fixed": {
+          "escalated": 69,
+          "answered": 8,
+          "format_error": 0
+        },
+        "escalated_recall_b3": 0.6313202247191011,
+        "escalated_recall_after": 0.7749297752808989,
+        "net_fixed_per_escalation": 0.09691011235955056
+      }
+    },
+    "cross": {
+      "7b B3 搜一次 + 重排 − 3b cascade 每题 agent 探测": [
+        0.04625,
+        0.0125,
+        0.08
+      ],
+      "7b cascade 分差门控 − 3b cascade 每题 agent 探测": [
+        0.09875,
+        0.06375,
+        0.13375
+      ]
+    }
   }
 }

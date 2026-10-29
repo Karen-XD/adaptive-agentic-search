@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import yaml
@@ -97,6 +97,8 @@ def main() -> None:
                            **{f"{k}_{s}": metrics[s, label][k] for s in SIZES
                               for k in ("accuracy", "f1", "evidence_recall", "mean_prompt_tokens", "mean_search_calls",
                                         "format_error_rate", "probe_rate", "escalation_rate") if k in metrics[s, label]},
+                           **{f"latency_p50_{s}": metrics[s, label]["latency_ms"]["p50"] for s in SIZES},
+                           **{f"latency_p95_{s}": metrics[s, label]["latency_ms"]["p95"] for s in SIZES},
                            "em_7b_minus_3b": gain, **{f"em_minus_b3_{s}": vs_b3[s] for s in SIZES}}
             dash = f"{'—':>21s}"
             print(f"{label:24s} {m3['accuracy']:6.3f} {m7['accuracy']:6.3f} {ci(gain):>21s}"
@@ -126,7 +128,40 @@ def main() -> None:
                     acc[labels[q]["type"]].append(t["eval"]["em"])
                 by_type[label][s] = {k: sum(v) / len(v) for k, v in acc.items()}
             print(f"  {label:24s} " + "  ".join(f"{by_type[label]['3b'][t]:.3f}→{by_type[label]['7b'][t]:.3f}" for t in types))
-        result[ds] = {"rows": rows, "decomposition": decomp, "by_type": by_type, "commits": commits}
+
+        # 分差门控只看第一跳的重排分数，和模型无关：两个模型被送去探测的应是同一批题，差别只来自模型
+        gap = "cascade 分差门控"
+        probed = {s: {q for q, t in trajs[s, gap].items() if t["escalation"]["probed"]} for s in SIZES}
+        same = len(probed["3b"] & probed["7b"]), len(probed["3b"] | probed["7b"])
+        print(f"  分差门控探测的题：两个模型重合 {same[0]} / 并集 {same[1]}")
+
+        # agent 探测相对 B3 的收益，按探测时模型的选择拆开：直接作答（修读错）/ 再搜一次（补证据）
+        agent = "cascade 每题 agent 探测"
+        probe = {}
+        print("  agent 探测按模型选择拆开（净修对题数 = 错→对 − 对→错；召回 = 再搜那批题的证据召回 B3 → 再搜后）")
+        for s in SIZES:
+            outcome = {q: t["escalation"]["outcome"] for q, t in trajs[s, agent].items()}
+            net = defaultdict(int)
+            for q in labels:
+                net[outcome[q]] += trajs[s, agent][q]["eval"]["em"] - trajs[s, b3][q]["eval"]["em"]
+            esc = [q for q in labels if outcome[q] == "escalated"]
+            rec = (sum(trajs[s, b3][q]["eval"]["evidence_recall"] for q in esc) / len(esc),
+                   sum(trajs[s, agent][q]["eval"]["evidence_recall"] for q in esc) / len(esc))
+            probe[s] = {"counts": dict(Counter(outcome.values())), "net_fixed": dict(net),
+                        "escalated_recall_b3": rec[0], "escalated_recall_after": rec[1],
+                        "net_fixed_per_escalation": net["escalated"] / len(esc)}
+            print(f"  {s}: 直接作答 {probe[s]['counts'].get('answered', 0)} 题 净 {net['answered']:+d}；"
+                  f"再搜 {len(esc)} 题 净 {net['escalated']:+d}（每次再搜 {net['escalated'] / len(esc):.3f}），"
+                  f"召回 {rec[0]:.3f} → {rec[1]:.3f}")
+
+        # 两种花算力的方式直接比：换大模型（7B 只搜一次 / 分差门控） vs 小模型 + 每题探测
+        cross = {}
+        for big in (b3, gap):
+            d = paired_bootstrap([trajs["7b", big][q]["eval"]["em"] - trajs["3b", agent][q]["eval"]["em"] for q in labels])
+            cross[f"7b {big} − 3b {agent}"] = d
+            print(f"  7B {big} − 3B {agent}：{ci(d)}")
+        result[ds] = {"rows": rows, "decomposition": decomp, "by_type": by_type, "commits": commits,
+                      "gap_probed_overlap": same, "agent_probe": probe, "cross": cross}
     if args.out:
         Path(args.out).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
