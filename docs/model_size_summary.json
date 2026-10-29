@@ -1,0 +1,518 @@
+{
+  "hotpotqa": {
+    "rows": {
+      "B0 Direct": {
+        "runs": {
+          "3b": "20261029-233150-qwen3b-direct-validation",
+          "7b": "20261029-234402-qwen7b-direct-validation"
+        },
+        "accuracy_3b": 0.12,
+        "f1_3b": 0.18219284188034185,
+        "evidence_recall_3b": 0.0,
+        "mean_prompt_tokens_3b": 231.765,
+        "mean_search_calls_3b": 0.0,
+        "format_error_rate_3b": 0.02912621359223301,
+        "accuracy_7b": 0.195,
+        "f1_7b": 0.2888199665831245,
+        "evidence_recall_7b": 0.0,
+        "mean_prompt_tokens_7b": 258.625,
+        "mean_search_calls_7b": 0.0,
+        "format_error_rate_7b": 0.0990990990990991,
+        "em_7b_minus_3b": [
+          0.075,
+          0.015,
+          0.135
+        ],
+        "em_minus_b3_3b": [
+          -0.285,
+          -0.355,
+          -0.215
+        ],
+        "em_minus_b3_7b": [
+          -0.27,
+          -0.345,
+          -0.195
+        ]
+      },
+      "B3 搜一次 + 重排": {
+        "runs": {
+          "3b": "20261029-233529-qwen3b-static-rag-dense-rerank-validation",
+          "7b": "20261029-234813-qwen7b-static-rag-dense-rerank-validation"
+        },
+        "accuracy_3b": 0.405,
+        "f1_3b": 0.5494017375065969,
+        "evidence_recall_3b": 0.8225,
+        "mean_prompt_tokens_3b": 589.19,
+        "mean_search_calls_3b": 1.0,
+        "format_error_rate_3b": 0.009900990099009901,
+        "accuracy_7b": 0.465,
+        "f1_7b": 0.6390158730158731,
+        "evidence_recall_7b": 0.8225,
+        "mean_prompt_tokens_7b": 599.98,
+        "mean_search_calls_7b": 1.0,
+        "format_error_rate_7b": 0.024390243902439025,
+        "em_7b_minus_3b": [
+          0.06,
+          0.0,
+          0.12
+        ],
+        "em_minus_b3_3b": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "em_minus_b3_7b": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "cascade 分差门控": {
+        "runs": {
+          "3b": "20261029-233648-qwen3b-cascade-gap-validation",
+          "7b": "20261029-235015-qwen7b-cascade-gap-validation"
+        },
+        "accuracy_3b": 0.43,
+        "f1_3b": 0.5758723257418911,
+        "evidence_recall_3b": 0.855,
+        "mean_prompt_tokens_3b": 845.725,
+        "mean_search_calls_3b": 1.21,
+        "format_error_rate_3b": 0.0,
+        "probe_rate_3b": 0.34,
+        "escalation_rate_3b": 0.21,
+        "accuracy_7b": 0.49,
+        "f1_7b": 0.6675304928989143,
+        "evidence_recall_7b": 0.8625,
+        "mean_prompt_tokens_7b": 874.925,
+        "mean_search_calls_7b": 1.245,
+        "format_error_rate_7b": 0.018315018315018316,
+        "probe_rate_7b": 0.34,
+        "escalation_rate_7b": 0.245,
+        "em_7b_minus_3b": [
+          0.06,
+          -0.005,
+          0.125
+        ],
+        "em_minus_b3_3b": [
+          0.025,
+          0.005,
+          0.05
+        ],
+        "em_minus_b3_7b": [
+          0.025,
+          0.0,
+          0.05
+        ]
+      },
+      "cascade 每题 agent 探测": {
+        "runs": {
+          "3b": "20261029-233902-qwen3b-cascade-always-agent-validation",
+          "7b": "20261029-235321-qwen7b-cascade-always-agent-validation"
+        },
+        "accuracy_3b": 0.485,
+        "f1_3b": 0.6288128019323673,
+        "evidence_recall_3b": 0.8625,
+        "mean_prompt_tokens_3b": 1125.215,
+        "mean_search_calls_3b": 1.455,
+        "format_error_rate_3b": 0.045454545454545456,
+        "probe_rate_3b": 1.0,
+        "escalation_rate_3b": 0.455,
+        "accuracy_7b": 0.51,
+        "f1_7b": 0.6837400932400935,
+        "evidence_recall_7b": 0.8875,
+        "mean_prompt_tokens_7b": 1194.35,
+        "mean_search_calls_7b": 1.585,
+        "format_error_rate_7b": 0.018575851393188854,
+        "probe_rate_7b": 1.0,
+        "escalation_rate_7b": 0.585,
+        "em_7b_minus_3b": [
+          0.025,
+          -0.035,
+          0.085
+        ],
+        "em_minus_b3_3b": [
+          0.08,
+          0.03,
+          0.13
+        ],
+        "em_minus_b3_7b": [
+          0.045,
+          0.0,
+          0.095
+        ]
+      },
+      "Oracle（诊断上限）": {
+        "runs": {
+          "3b": "20261029-233300-qwen3b-oracle-validation",
+          "7b": "20261029-234636-qwen7b-oracle-validation"
+        },
+        "accuracy_3b": 0.54,
+        "f1_3b": 0.6993043024227239,
+        "evidence_recall_3b": 1.0,
+        "mean_prompt_tokens_3b": 459.455,
+        "mean_search_calls_3b": 0.0,
+        "format_error_rate_3b": 0.009900990099009901,
+        "accuracy_7b": 0.655,
+        "f1_7b": 0.8169419703103914,
+        "evidence_recall_7b": 1.0,
+        "mean_prompt_tokens_7b": 457.115,
+        "mean_search_calls_7b": 0.0,
+        "format_error_rate_7b": 0.004975124378109453,
+        "em_7b_minus_3b": [
+          0.115,
+          0.055,
+          0.175
+        ],
+        "em_minus_b3_3b": [
+          0.135,
+          0.08,
+          0.195
+        ],
+        "em_minus_b3_7b": [
+          0.19,
+          0.135,
+          0.25
+        ]
+      }
+    },
+    "decomposition": {
+      "3b": {
+        "retrieval_gain": 0.28500000000000003,
+        "escalation_gain": 0.07999999999999996,
+        "retrieval_gap_to_oracle": 0.05500000000000005,
+        "reading_and_noise": 0.45999999999999996
+      },
+      "7b": {
+        "retrieval_gain": 0.27,
+        "escalation_gain": 0.044999999999999984,
+        "retrieval_gap_to_oracle": 0.14500000000000002,
+        "reading_and_noise": 0.345
+      }
+    },
+    "by_type": {
+      "B0 Direct": {
+        "3b": {
+          "comparison": 0.3170731707317073,
+          "bridge": 0.06918238993710692
+        },
+        "7b": {
+          "comparison": 0.5365853658536586,
+          "bridge": 0.1069182389937107
+        }
+      },
+      "B3 搜一次 + 重排": {
+        "3b": {
+          "comparison": 0.4146341463414634,
+          "bridge": 0.4025157232704403
+        },
+        "7b": {
+          "comparison": 0.5365853658536586,
+          "bridge": 0.44654088050314467
+        }
+      },
+      "cascade 分差门控": {
+        "3b": {
+          "comparison": 0.4146341463414634,
+          "bridge": 0.4339622641509434
+        },
+        "7b": {
+          "comparison": 0.5365853658536586,
+          "bridge": 0.4779874213836478
+        }
+      },
+      "cascade 每题 agent 探测": {
+        "3b": {
+          "comparison": 0.5853658536585366,
+          "bridge": 0.4591194968553459
+        },
+        "7b": {
+          "comparison": 0.5853658536585366,
+          "bridge": 0.49056603773584906
+        }
+      },
+      "Oracle（诊断上限）": {
+        "3b": {
+          "comparison": 0.5853658536585366,
+          "bridge": 0.5283018867924528
+        },
+        "7b": {
+          "comparison": 0.6585365853658537,
+          "bridge": 0.6540880503144654
+        }
+      }
+    },
+    "commits": [
+      "7ba7db9",
+      "f85aa50"
+    ]
+  },
+  "2wiki": {
+    "rows": {
+      "B0 Direct": {
+        "runs": {
+          "3b": "20261030-005505-qwen3b-2wiki-direct-validation",
+          "7b": "20261029-235728-qwen7b-2wiki-direct-validation"
+        },
+        "accuracy_3b": 0.32,
+        "f1_3b": 0.35476845131992135,
+        "evidence_recall_3b": 0.0,
+        "mean_prompt_tokens_3b": 217.88875,
+        "mean_search_calls_3b": 0.0,
+        "format_error_rate_3b": 0.0037359900373599006,
+        "accuracy_7b": 0.34375,
+        "f1_7b": 0.39173483460983405,
+        "evidence_recall_7b": 0.0,
+        "mean_prompt_tokens_7b": 270.54375,
+        "mean_search_calls_7b": 0.0,
+        "format_error_rate_7b": 0.12171052631578948,
+        "em_7b_minus_3b": [
+          0.02375,
+          -0.005,
+          0.0525
+        ],
+        "em_minus_b3_3b": [
+          -0.02625,
+          -0.05875,
+          0.00625
+        ],
+        "em_minus_b3_7b": [
+          -0.0925,
+          -0.12125,
+          -0.06375
+        ]
+      },
+      "B3 搜一次 + 重排": {
+        "runs": {
+          "3b": "20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation",
+          "7b": "20261030-001517-qwen7b-2wiki-static-rag-dense-rerank-validation"
+        },
+        "accuracy_3b": 0.34625,
+        "f1_3b": 0.40536942224442163,
+        "evidence_recall_3b": 0.64875,
+        "mean_prompt_tokens_3b": 683.0475,
+        "mean_search_calls_3b": 1.0,
+        "format_error_rate_3b": 0.013597033374536464,
+        "accuracy_7b": 0.43625,
+        "f1_7b": 0.5052372649280538,
+        "evidence_recall_7b": 0.64875,
+        "mean_prompt_tokens_7b": 677.49375,
+        "mean_search_calls_7b": 1.0,
+        "format_error_rate_7b": 0.0024937655860349127,
+        "em_7b_minus_3b": [
+          0.09,
+          0.06,
+          0.12
+        ],
+        "em_minus_b3_3b": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "em_minus_b3_7b": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "cascade 分差门控": {
+        "runs": {
+          "3b": "20261003-144150-qwen3b-2wiki-cascade-gap-validation",
+          "7b": "20261030-002313-qwen7b-2wiki-cascade-gap-validation"
+        },
+        "accuracy_3b": 0.37875,
+        "f1_3b": 0.44222358891108826,
+        "evidence_recall_3b": 0.700625,
+        "mean_prompt_tokens_3b": 994.27875,
+        "mean_search_calls_3b": 1.2375,
+        "format_error_rate_3b": 0.010476190476190476,
+        "probe_rate_3b": 0.30125,
+        "escalation_rate_3b": 0.2375,
+        "accuracy_7b": 0.48875,
+        "f1_7b": 0.5651731415514305,
+        "evidence_recall_7b": 0.7165625,
+        "mean_prompt_tokens_7b": 1004.78125,
+        "mean_search_calls_7b": 1.26875,
+        "format_error_rate_7b": 0.0019175455417066154,
+        "probe_rate_7b": 0.30125,
+        "escalation_rate_7b": 0.26875,
+        "em_7b_minus_3b": [
+          0.11,
+          0.07625,
+          0.1425
+        ],
+        "em_minus_b3_3b": [
+          0.0325,
+          0.02,
+          0.04625
+        ],
+        "em_minus_b3_7b": [
+          0.0525,
+          0.0375,
+          0.06875
+        ]
+      },
+      "cascade 每题 agent 探测": {
+        "runs": {
+          "3b": "20261003-144949-qwen3b-2wiki-cascade-always-agent-validation",
+          "7b": "20261030-003533-qwen7b-2wiki-cascade-always-agent-validation"
+        },
+        "accuracy_3b": 0.39,
+        "f1_3b": 0.4503506354756348,
+        "evidence_recall_3b": 0.7459375,
+        "mean_prompt_tokens_3b": 1437.14625,
+        "mean_search_calls_3b": 1.585,
+        "format_error_rate_3b": 0.03018867924528302,
+        "probe_rate_3b": 1.0,
+        "escalation_rate_3b": 0.585,
+        "accuracy_7b": 0.5325,
+        "f1_7b": 0.6062794774669769,
+        "evidence_recall_7b": 0.7765625,
+        "mean_prompt_tokens_7b": 1671.46125,
+        "mean_search_calls_7b": 1.89,
+        "format_error_rate_7b": 0.008524590163934427,
+        "probe_rate_7b": 1.0,
+        "escalation_rate_7b": 0.89,
+        "em_7b_minus_3b": [
+          0.1425,
+          0.1075,
+          0.1775
+        ],
+        "em_minus_b3_3b": [
+          0.04375,
+          0.015,
+          0.07375
+        ],
+        "em_minus_b3_7b": [
+          0.09625,
+          0.07,
+          0.1225
+        ]
+      },
+      "Oracle（诊断上限）": {
+        "runs": {
+          "3b": "20261030-005835-qwen3b-2wiki-oracle-validation",
+          "7b": "20261030-000900-qwen7b-2wiki-oracle-validation"
+        },
+        "accuracy_3b": 0.57875,
+        "f1_3b": 0.647736256798757,
+        "evidence_recall_3b": 1.0,
+        "mean_prompt_tokens_3b": 616.2,
+        "mean_search_calls_3b": 0.0,
+        "format_error_rate_3b": 0.0,
+        "accuracy_7b": 0.74125,
+        "f1_7b": 0.803942289070579,
+        "evidence_recall_7b": 1.0,
+        "mean_prompt_tokens_7b": 618.375,
+        "mean_search_calls_7b": 0.0,
+        "format_error_rate_7b": 0.0024937655860349127,
+        "em_7b_minus_3b": [
+          0.1625,
+          0.12625,
+          0.19875
+        ],
+        "em_minus_b3_3b": [
+          0.2325,
+          0.19625,
+          0.26875
+        ],
+        "em_minus_b3_7b": [
+          0.305,
+          0.27,
+          0.34125
+        ]
+      }
+    },
+    "decomposition": {
+      "3b": {
+        "retrieval_gain": 0.026249999999999996,
+        "escalation_gain": 0.04375000000000001,
+        "retrieval_gap_to_oracle": 0.18874999999999997,
+        "reading_and_noise": 0.42125
+      },
+      "7b": {
+        "retrieval_gain": 0.09250000000000003,
+        "escalation_gain": 0.09624999999999995,
+        "retrieval_gap_to_oracle": 0.20875,
+        "reading_and_noise": 0.25875000000000004
+      }
+    },
+    "by_type": {
+      "B0 Direct": {
+        "3b": {
+          "bridge_comparison": 0.625,
+          "comparison": 0.575,
+          "compositional": 0.08,
+          "inference": 0.0
+        },
+        "7b": {
+          "bridge_comparison": 0.6,
+          "comparison": 0.69,
+          "compositional": 0.065,
+          "inference": 0.02
+        }
+      },
+      "B3 搜一次 + 重排": {
+        "3b": {
+          "bridge_comparison": 0.655,
+          "comparison": 0.56,
+          "compositional": 0.105,
+          "inference": 0.065
+        },
+        "7b": {
+          "bridge_comparison": 0.71,
+          "comparison": 0.82,
+          "compositional": 0.135,
+          "inference": 0.08
+        }
+      },
+      "cascade 分差门控": {
+        "3b": {
+          "bridge_comparison": 0.655,
+          "comparison": 0.57,
+          "compositional": 0.2,
+          "inference": 0.09
+        },
+        "7b": {
+          "bridge_comparison": 0.715,
+          "comparison": 0.83,
+          "compositional": 0.295,
+          "inference": 0.115
+        }
+      },
+      "cascade 每题 agent 探测": {
+        "3b": {
+          "bridge_comparison": 0.58,
+          "comparison": 0.635,
+          "compositional": 0.21,
+          "inference": 0.135
+        },
+        "7b": {
+          "bridge_comparison": 0.76,
+          "comparison": 0.87,
+          "compositional": 0.355,
+          "inference": 0.145
+        }
+      },
+      "Oracle（诊断上限）": {
+        "3b": {
+          "bridge_comparison": 0.635,
+          "comparison": 0.64,
+          "compositional": 0.62,
+          "inference": 0.42
+        },
+        "7b": {
+          "bridge_comparison": 0.815,
+          "comparison": 0.875,
+          "compositional": 0.695,
+          "inference": 0.58
+        }
+      }
+    },
+    "commits": [
+      "56a64bc",
+      "c2ae5ef",
+      "c4f50e2",
+      "f85aa50"
+    ]
+  }
+}

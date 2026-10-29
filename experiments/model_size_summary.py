@@ -1,8 +1,12 @@
-"""模型尺寸对照（3B vs 7B，validation）：同一台机器、同一份代码，V2 的 5 组只换模型。
+"""模型尺寸对照（3B vs 7B，validation）：同一台机器（RTX 4090）、V2 的 5 组只换模型。
 
-用法：python -m experiments.model_size_summary --since 20261029-000000 [--out outputs/model_size_summary.json]
+用法：python -m experiments.model_size_summary --since 20261029-000000 [--out docs/model_size_summary.json]
 按运行名找 outputs/runs 下 --since 之后的 validation 运行（每组正好一个带 metrics.json 的；多了少了都报错），
 并核对服务端实际加载的模型目录，防止"配置写的 7B、服务端其实是 3B"。
+
+例外 PINNED：3B 在 2Wiki 上的 B3 / 分差门控 / agent 探测不重跑，用 10 月初同一台 4090 上的旧运行（用户 2026-10-30 决定）。
+依据：3B 在 HotpotQA 上今天重跑的 5 组和 10 月初的旧运行逐字一致（1000/1000 条生成相同），
+旧运行的 commit 到现在 QA 代码只新增了级联方法和指标，没改这三组的代码路径。
 
 回答三个问题：
 1. 同一组换成 7B 涨多少（7B − 3B，同一批题逐题配对）
@@ -29,9 +33,14 @@ ARMS = [("B0 Direct", "direct"), ("B3 搜一次 + 重排", "static-rag-dense-rer
 SIZES = {"3b": "Qwen2.5-3B-Instruct", "7b": "Qwen2.5-7B-Instruct"}
 DATASETS = {"hotpotqa": ("", "data/hotpotqa/v1/labels/validation.jsonl"),
             "2wiki": ("2wiki-", "data/2wiki/v1/labels/validation.jsonl")}
+PINNED = {"qwen3b-2wiki-static-rag-dense-rerank": "20261002-164844-qwen3b-2wiki-static-rag-dense-rerank-validation",
+          "qwen3b-2wiki-cascade-gap": "20261003-144150-qwen3b-2wiki-cascade-gap-validation",
+          "qwen3b-2wiki-cascade-always-agent": "20261003-144949-qwen3b-2wiki-cascade-always-agent-validation"}
 
 
 def find_run(name: str, since: str) -> Path:
+    if name in PINNED:
+        return RUNS / PINNED[name]
     pat = re.compile(rf"^(\d{{8}}-\d{{6}})-{re.escape(name)}-validation$")
     runs = [p for p in RUNS.iterdir() if (m := pat.match(p.name)) and m.group(1) >= since
             and (p / "metrics.json").exists()]
