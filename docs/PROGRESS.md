@@ -4,6 +4,18 @@
 
 ## 当前位置
 
+> **🔬 2026-10-29 进行中：模型尺寸对照（3B vs 7B，validation）**。用户要求用 Qwen2.5-7B-Instruct 跑 V2 最佳方案 + Oracle。⚠️ 当前机器是 **RTX 4090 24GB**（不是 A800），3B 对照组在这台机器上重跑。
+
+**做什么**：V2 的 5 组只换模型，其余（检索栈、门槛、提示词、解码、预算）一字不改，两个数据集的 validation 各跑一遍（HotpotQA 200 题、2Wiki 800 题）：
+- B0 Direct（不检索）、B3（搜一次 + 重排）、cascade 分差门控（成本优先）、cascade 每题 agent 探测（质量优先）、Oracle（金标段落，诊断上限）
+- 配置 `configs/qwen7b_*.yaml`（extends 对应的 3B 配置，只覆盖 `llm.model`）；运行 `bash experiments/run_model_size.sh 3b|7b hotpotqa|2wiki`；汇总 `python -m experiments.model_size_summary --since 20261029-000000`
+- 新增 `configs/qwen3b_2wiki_oracle.yaml`：2Wiki 之前没跑过 Oracle
+- 7B 模型：`scripts/download_model_modelscope.sh`（ModelScope + aria2c，约 17MB/s，按接口 sha256 逐个校验，结果写进模型目录的 `SHA256SUMS`）→ `/root/autodl-tmp/hf_models/Qwen2.5-7B-Instruct/`
+
+**要回答的问题**：① 7B 比 3B 涨多少、涨在哪种题型；② V2 的结论（按需升级 > B3、全量多轮不划算）换大模型后是否还成立；③ 损失拆解 B0 → B3 → 级联 → Oracle → 100% 怎么变：V2 报告里"不能外推到更大模型"的那条限制，这次正好验证。
+
+**进度**：3B HotpotQA 运行中（Direct 0.120，和 9 月的历史运行一致）。
+
 > **✅ 2026-10-06 迁移到 A800 80GB 完成，下一步进入 V3**（按 `docs/MIGRATION.md` 第 5.2 节的顺序，先读 Search-R1 训练链路；启动前和用户确认）。
 
 **迁移验收（2026-10-06，A800 80GB PCIe，14 vCPU，内存 120GB）**：
@@ -913,6 +925,11 @@ cd /root/adaptive-agentic-search && conda activate dsr1 && pytest tests/ -q   # 
 | 2026-10-06 | 迁移验收里 Dense 指纹（前 10 名顺序一致 90.5% / 94.0%，门槛 95%）判为可接受 | 不一致全在第 4 名以后、互换段落分数差 ≤ 9e-5（近似并列，换卡 fp16 重新编码）；前 3 名 500/500 一致，实验只用前 3 |
 | 2026-10-06 | 4090 上的旧结果照常引用；V3 的所有对照组在 A800 上重跑 | 换卡后 B3 有 9/200 题答案不同、EM −1.5（区间上沿到 0）；A800 同机重跑 200/200 逐字一致，同机比较没有这层噪声 |
 | 2026-10-06 | 恢复时把 ESCI 下载和 QA 部分拆开并行，不等串行脚本 | GitHub 单连接约 30KB/s，ESCI 1.1GB 要约 45 分钟；QA 数据和索引不依赖它，V3 也不用它；最后仍重跑完整脚本统一校验 |
+| 2026-10-29 | 7B 对照只换 `llm.model`，门槛 4.19 / 5.69、提示词都沿用 3B 的 | 门控只看重排分数、和模型无关，所以 3B 和 7B 被送去探测的是同一批题，差别只来自模型；为 7B 重新调门槛或提示词会混进调参的收益 |
+| 2026-10-29 | 只跑 validation，不跑 test | Oracle 本来就拒绝 test；test 要先预先登记，这次是探索性对照，结论标注"validation" |
+| 2026-10-29 | 3B 在同一台机器上重跑，不用 10 月 2 日的旧运行 | 换卡后同一配置 EM 能差 1.5 个点（迁移验收），尺寸对照只和同机运行比；汇总脚本核对每个运行服务端实际加载的模型目录 |
+| 2026-10-29 | "最佳方案"跑两个点：分差门控和每题 agent 探测 | V2 质量–成本前沿上只有这两个点（成本优先 / 质量优先），只跑一个说不清 7B 改变的是哪一端 |
+| 2026-10-29 | `docs/01_项目拆解与面试口径.md` 加进 `.git/info/exclude`，只留本地 | 用户要求；它不是本仓库生成的文件，又必须让工作区干净才能正式运行 |
 | 2026-09-25 | 进度靠 `CLAUDE.md` + `docs/PROGRESS.md` + `docs/LEARNING_NOTES.md` 保存，并定期 push 到 GitHub | 对话记录会被压缩或清理；仓库在数据盘上，实例释放即丢失 |
 
 ## 已有资产（上一次 Search-R1 复现留下，位于系统盘 `/root/Search-R1/`）
